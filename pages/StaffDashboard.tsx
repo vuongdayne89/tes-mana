@@ -15,7 +15,11 @@ const StaffDashboard: React.FC = () => {
   const [pendingToken, setPendingToken] = useState('');
 
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
-    setStatus(null);
+    if (!idOrToken) return;
+    
+    // Reset status only if not in PIN flow
+    if (!pin) setStatus(null);
+    
     const res = await performCheckIn(idOrToken, method, 'anan1', 'staff1', pin);
     
     if (res.requirePin) {
@@ -33,6 +37,9 @@ const StaffDashboard: React.FC = () => {
         setPendingToken('');
         // Refresh logs if successful
         getCheckInLogs().then(setLogs);
+    } else if (pin) {
+        // If PIN failed, keep PIN input open but show error
+        // optional: setRequirePin(false) if max retries reached logic exists in FE
     }
   };
 
@@ -61,13 +68,13 @@ const StaffDashboard: React.FC = () => {
       {/* Tab Navigation */}
       <div className="flex bg-white rounded-lg p-1 mb-6 shadow-sm border border-gray-200">
         <button 
-          onClick={() => setActiveTab('scan')}
+          onClick={() => { setActiveTab('scan'); setStatus(null); }}
           className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'scan' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
           QR Scan
         </button>
         <button 
-          onClick={() => setActiveTab('manual')}
+          onClick={() => { setActiveTab('manual'); setStatus(null); }}
           className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'manual' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
           Manual
@@ -110,7 +117,7 @@ const StaffDashboard: React.FC = () => {
             </div>
             
              <button onClick={copyDemoToken} className="text-xs text-blue-500 underline mt-4">
-                Generate Valid Demo Token (T003)
+                Generate Valid Demo Token (T003) for Testing
              </button>
           </div>
         )}
@@ -122,8 +129,9 @@ const StaffDashboard: React.FC = () => {
                     <KeyRound size={32} />
                 </div>
                 <div className="text-center">
-                    <h3 className="font-bold text-lg">PIN Required</h3>
-                    <p className="text-gray-500 text-sm">Ask customer to enter their PIN</p>
+                    <h3 className="font-bold text-lg">Authentication Required</h3>
+                    <p className="text-gray-500 text-sm">Ticket requires PIN verification.</p>
+                    <p className="text-gray-500 text-sm">Please ask customer to enter their PIN.</p>
                 </div>
                 <form onSubmit={handlePinSubmit} className="w-full max-w-xs">
                     <input 
@@ -133,6 +141,7 @@ const StaffDashboard: React.FC = () => {
                         className="w-full text-center text-3xl tracking-[1em] border-2 border-brand-500 rounded-lg p-3 mb-4"
                         value={customerPin}
                         onChange={e => setCustomerPin(e.target.value)}
+                        placeholder="••••"
                     />
                      <button 
                         type="submit"
@@ -143,7 +152,7 @@ const StaffDashboard: React.FC = () => {
                     </button>
                      <button 
                         type="button"
-                        onClick={() => { setRequirePin(false); setCustomerPin(''); setPendingToken(''); }}
+                        onClick={() => { setRequirePin(false); setCustomerPin(''); setPendingToken(''); setStatus(null); }}
                         className="w-full mt-2 py-2 text-gray-500"
                     >
                         Cancel
@@ -209,7 +218,7 @@ const StaffDashboard: React.FC = () => {
         )}
 
         {/* Status Feedback Modal/Overlay */}
-        {status && activeTab !== 'list' && (
+        {status && activeTab !== 'list' && !requirePin && (
           <div className="mt-6 p-4 rounded-lg bg-gray-50 border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-start">
               {status.success ? <CheckCircle className="text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="text-red-500 mr-3 flex-shrink-0" />}
