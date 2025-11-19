@@ -3,12 +3,12 @@ import Layout from '../components/Layout';
 import { UserRole, Ticket, AuditLog, TicketType, User } from '../types';
 import { 
   getAllTickets, getDashboardStats, createTicket, toggleTicketLock, 
-  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES 
+  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES, generateDayPassToken 
 } from '../services/mockDb';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { 
   Users, CreditCard, AlertTriangle, Activity, Lock, Unlock, Key, 
-  FileDown, Plus, Search, Briefcase, Trash2, Edit 
+  FileDown, Plus, Search, Briefcase, Trash2, Edit, QrCode, X 
 } from 'lucide-react';
 
 const OwnerDashboard: React.FC = () => {
@@ -22,12 +22,15 @@ const OwnerDashboard: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   
   // Form States
   const [newTicketPhone, setNewTicketPhone] = useState('');
   const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
   
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+  const [qrTicket, setQrTicket] = useState<Ticket | null>(null);
+  const [qrToken, setQrToken] = useState('');
   
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
@@ -92,6 +95,13 @@ const OwnerDashboard: React.FC = () => {
       alert('PIN reset to 1234');
       loadData();
     }
+  };
+  
+  const handleShowQr = async (ticket: Ticket) => {
+      const token = await generateDayPassToken(ticket.ticket_id);
+      setQrToken(token);
+      setQrTicket(ticket);
+      setShowQrModal(true);
   };
 
   // --- STAFF ACTIONS ---
@@ -224,6 +234,12 @@ const OwnerDashboard: React.FC = () => {
                             </span>
                             </td>
                             <td className="px-6 py-4 text-right space-x-2 flex justify-end">
+                                <button 
+                                    onClick={() => handleShowQr(t)}
+                                    className="p-1.5 hover:bg-purple-100 text-purple-600 rounded" title="Day Pass QR"
+                                >
+                                    <QrCode size={16} />
+                                </button>
                                 <button 
                                     onClick={() => handleEditTicketClick(t)}
                                     className="p-1.5 hover:bg-blue-100 text-blue-600 rounded" title="Edit Ticket"
@@ -437,6 +453,42 @@ const OwnerDashboard: React.FC = () => {
             </div>
         </div>
       )}
+      
+       {/* QR Day Pass Modal */}
+       {showQrModal && qrTicket && (
+          <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden relative animate-in zoom-in-95 duration-200">
+                <button 
+                  onClick={() => setShowQrModal(false)}
+                  className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+                
+                <div className="p-8 flex flex-col items-center text-center">
+                  <h3 className="font-bold text-xl mb-1 text-brand-600">DAY PASS</h3>
+                  <p className="font-medium text-gray-900">{qrTicket.owner_name}</p>
+                  <p className="text-gray-500 text-sm mb-6">{qrTicket.ticket_id}</p>
+                  
+                  <div className="bg-white p-4 rounded-xl border-2 border-brand-500 shadow-lg mb-6">
+                     <div className="w-48 h-48 bg-gray-900 flex flex-col items-center justify-center text-white text-[10px] break-all p-2 overflow-hidden">
+                        <QrCode size={48} className="mb-2" />
+                        <span className="opacity-50">Scan Me</span>
+                        <span className="mt-2 font-mono leading-none">{qrToken.substring(0, 20)}...</span>
+                     </div>
+                  </div>
+    
+                  <div className="bg-orange-50 text-orange-800 px-4 py-2 rounded-lg text-sm font-medium w-full">
+                    Valid until: {new Date().toLocaleDateString()} 23:59
+                  </div>
+                  
+                   <button onClick={() => window.print()} className="mt-4 text-brand-600 underline text-sm">
+                       Print This Pass
+                   </button>
+                </div>
+              </div>
+          </div>
+       )}
 
     </Layout>
   );

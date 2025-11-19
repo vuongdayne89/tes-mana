@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, CheckInLog } from '../types';
-import { performCheckIn, getCheckInLogs, generateTicketToken } from '../services/mockDb';
-import { Camera, Search, CheckCircle, XCircle, UserPlus, RefreshCw, KeyRound } from 'lucide-react';
+import { UserRole, CheckInLog, Ticket } from '../types';
+import { performCheckIn, getCheckInLogs, generateTicketToken, getTicketsByPhone, generateDayPassToken } from '../services/mockDb';
+import { Camera, Search, CheckCircle, XCircle, UserPlus, RefreshCw, KeyRound, User, QrCode, X, Printer } from 'lucide-react';
+import TicketCard from '../components/TicketCard';
 
 const StaffDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'list'>('scan');
-  const [manualId, setManualId] = useState('');
+  
+  // Manual/Search State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
   const [scanInput, setScanInput] = useState(''); // For demo: pasting the token
   const [status, setStatus] = useState<{msg: string, success: boolean} | null>(null);
   const [logs, setLogs] = useState<CheckInLog[]>([]);
   const [requirePin, setRequirePin] = useState(false);
   const [customerPin, setCustomerPin] = useState('');
   const [pendingToken, setPendingToken] = useState('');
+  
+  // QR Day Pass Modal
+  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket} | null>(null);
 
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
     if (!idOrToken) return;
@@ -30,7 +39,6 @@ const StaffDashboard: React.FC = () => {
 
     setStatus({ msg: res.message, success: res.success });
     if (res.success) {
-        setManualId('');
         setScanInput('');
         setRequirePin(false);
         setCustomerPin('');
@@ -41,6 +49,26 @@ const StaffDashboard: React.FC = () => {
         // If PIN failed, keep PIN input open but show error
         // optional: setRequirePin(false) if max retries reached logic exists in FE
     }
+  };
+  
+  const handleSearch = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSearchLoading(true);
+      setStatus(null);
+      setFoundTickets([]);
+      
+      // Search by phone logic
+      if (searchTerm.length >= 3) {
+          const tickets = await getTicketsByPhone(searchTerm);
+          setFoundTickets(tickets);
+          if(tickets.length === 0) setStatus({msg: 'No tickets found', success: false});
+      }
+      setSearchLoading(false);
+  };
+  
+  const handleGenerateQr = async (ticket: Ticket) => {
+      const token = await generateDayPassToken(ticket.ticket_id);
+      setQrModalData({ token, ticket });
   };
 
   const handlePinSubmit = async (e: React.FormEvent) => {
@@ -77,7 +105,7 @@ const StaffDashboard: React.FC = () => {
           onClick={() => { setActiveTab('manual'); setStatus(null); }}
           className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'manual' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
-          Manual
+          Manage / Manual
         </button>
          <button 
           onClick={() => setActiveTab('list')}
@@ -88,7 +116,7 @@ const StaffDashboard: React.FC = () => {
       </div>
 
       {/* Content */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px]">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] relative">
         
         {activeTab === 'scan' && !requirePin && (
           <div className="flex flex-col items-center justify-center h-full space-y-6">
@@ -164,29 +192,54 @@ const StaffDashboard: React.FC = () => {
         {activeTab === 'manual' && (
           <div className="max-w-md mx-auto space-y-6">
             <div className="text-center">
-              <h3 className="font-semibold text-gray-900">Manual Check-in</h3>
-              <p className="text-sm text-gray-500">Enter Ticket ID to override</p>
+              <h3 className="font-semibold text-gray-900">Lookup & Manual Entry</h3>
+              <p className="text-sm text-gray-500">Search by Phone to find tickets</p>
             </div>
             
-            <div className="relative">
+            <form onSubmit={handleSearch} className="relative">
               <Search className="absolute left-3 top-3 text-gray-400" size={20} />
               <input 
                 type="text" 
-                value={manualId}
-                onChange={(e) => setManualId(e.target.value)}
-                placeholder="e.g., T001"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Enter Phone Number..."
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
-            </div>
+              <button type="submit" className="hidden">Search</button>
+            </form>
 
-            <button 
-              onClick={() => handleCheckIn(manualId, 'MANUAL')}
-              disabled={!manualId}
-              className="w-full flex items-center justify-center py-3 bg-brand-600 disabled:bg-gray-300 text-white rounded-lg font-medium hover:bg-brand-700"
-            >
-              <UserPlus size={20} className="mr-2" />
-              Manual Check In (Log)
-            </button>
+            <div className="space-y-3">
+                {searchLoading && <p className="text-center text-gray-500">Searching...</p>}
+                
+                {foundTickets.map(t => (
+                    <div key={t.ticket_id} className="border rounded-xl p-4 bg-gray-50">
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <div className="font-bold">{t.owner_name}</div>
+                                <div className="text-xs text-gray-500">{t.ticket_id} • {t.type}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="font-bold text-brand-600">{t.remaining_uses} left</div>
+                            </div>
+                        </div>
+                        
+                        <div className="flex space-x-2">
+                            <button 
+                                onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')}
+                                className="flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700 flex items-center justify-center"
+                            >
+                                <CheckCircle size={16} className="mr-2" /> Check In
+                            </button>
+                            <button 
+                                onClick={() => handleGenerateQr(t)}
+                                className="flex-1 bg-white border border-brand-600 text-brand-600 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 flex items-center justify-center"
+                            >
+                                <QrCode size={16} className="mr-2" /> Issue QR Pass
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
           </div>
         )}
 
@@ -229,6 +282,41 @@ const StaffDashboard: React.FC = () => {
                 <p className="text-sm text-gray-600 break-all">{status.msg}</p>
               </div>
             </div>
+          </div>
+        )}
+        
+        {/* QR Modal */}
+        {qrModalData && (
+            <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 rounded-xl z-10 backdrop-blur-sm">
+             <div className="bg-white rounded-2xl w-full max-w-xs overflow-hidden relative animate-in zoom-in-95 duration-200">
+                <button 
+                  onClick={() => setQrModalData(null)}
+                  className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+                
+                <div className="p-6 flex flex-col items-center text-center">
+                  <h3 className="font-bold text-lg mb-1 text-brand-600">DAY PASS</h3>
+                  <p className="font-medium text-gray-900 text-sm">{qrModalData.ticket.owner_name}</p>
+                  <p className="text-gray-400 text-xs mb-4">{qrModalData.ticket.ticket_id}</p>
+                  
+                  <div className="bg-white p-2 rounded-lg border border-brand-500 shadow-md mb-4">
+                     <div className="w-40 h-40 bg-gray-900 flex flex-col items-center justify-center text-white text-[8px] break-all p-2 overflow-hidden">
+                        <QrCode size={32} className="mb-1" />
+                        <span className="mt-1 font-mono leading-none opacity-70">{qrModalData.token.substring(0, 16)}...</span>
+                     </div>
+                  </div>
+    
+                  <div className="bg-orange-50 text-orange-800 px-3 py-1 rounded text-xs font-medium w-full mb-3">
+                    Valid: {new Date().toLocaleDateString()}
+                  </div>
+                  
+                   <button onClick={() => window.print()} className="flex items-center justify-center text-brand-600 text-xs font-bold">
+                       <Printer size={14} className="mr-1"/> Print Pass
+                   </button>
+                </div>
+              </div>
           </div>
         )}
       </div>

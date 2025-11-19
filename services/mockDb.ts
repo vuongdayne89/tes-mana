@@ -121,6 +121,11 @@ export const getTicketsByPhone = async (phone: string): Promise<Ticket[]> => {
   return (data as Ticket[]) || [];
 };
 
+export const getTicketById = async (ticketId: string): Promise<Ticket | null> => {
+    const { data } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
+    return data as Ticket | null;
+};
+
 export const getAllTickets = async (): Promise<Ticket[]> => {
   const { data } = await supabase.from('tickets').select('*');
   return (data as Ticket[]) || [];
@@ -131,8 +136,23 @@ export const generateTicketToken = async (ticketId: string): Promise<string> => 
   // HMAC Generation: Hash(ID + Timestamp + Secret)
   const signature = mockHmac(`${ticketId}|${timestamp}|${HMAC_SECRET}`);
   
-  const payload = JSON.stringify({ id: ticketId, ts: timestamp, sig: signature });
+  // Type: 'dynamic' is the default rotating token
+  const payload = JSON.stringify({ id: ticketId, ts: timestamp, sig: signature, type: 'dynamic' });
   return btoa(payload);
+};
+
+export const generateDayPassToken = async (ticketId: string): Promise<string> => {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    // Unique signature for the day
+    const signature = mockHmac(`${ticketId}|${today}|daypass|${HMAC_SECRET}`);
+    
+    const payload = JSON.stringify({ 
+        id: ticketId, 
+        date: today, 
+        sig: signature, 
+        type: 'daypass' 
+    });
+    return btoa(payload);
 };
 
 // 3. Check-in Logic
@@ -150,20 +170,30 @@ export const performCheckIn = async (
   if (method === 'QR_RIENG') {
     try {
       const decoded = JSON.parse(atob(identifier));
-      const { id, ts, sig } = decoded;
-      
-      // 1a. Validate Signature (HMAC)
-      const expectedSig = mockHmac(`${id}|${ts}|${HMAC_SECRET}`);
-      if (sig !== expectedSig) {
-         return { success: false, message: 'Token giả mạo (Invalid Signature).' };
-      }
-
-      // 1b. Validate Expiration (5 minutes)
-      if (Date.now() - ts > 300000) { 
-         return { success: false, message: 'Mã QR đã hết hạn. Vui lòng tải lại.' };
-      }
-
+      const { id, ts, sig, type, date } = decoded;
       ticketId = id;
+      
+      if (type === 'daypass') {
+          // Validate Day Pass
+          const today = new Date().toISOString().split('T')[0];
+          if (date !== today) {
+              return { success: false, message: 'Mã QR này chỉ có hiệu lực trong ngày ' + date };
+          }
+          const expectedSig = mockHmac(`${id}|${date}|daypass|${HMAC_SECRET}`);
+          if (sig !== expectedSig) {
+             return { success: false, message: 'Token DayPass không hợp lệ.' };
+          }
+      } else {
+          // Validate Dynamic Token (Default)
+          const expectedSig = mockHmac(`${id}|${ts}|${HMAC_SECRET}`);
+          if (sig !== expectedSig) {
+             return { success: false, message: 'Token giả mạo (Invalid Signature).' };
+          }
+          // Validate Expiration (5 minutes for dynamic)
+          if (Date.now() - ts > 300000) { 
+             return { success: false, message: 'Mã QR đã hết hạn. Vui lòng tải lại.' };
+          }
+      }
     } catch (e) {
       return { success: false, message: 'Mã QR không hợp lệ.' };
     }
@@ -189,8 +219,10 @@ export const performCheckIn = async (
   }
 
   // --- STEP 3: Validate PIN (If required) ---
-  // For Manual check-in by staff, we might skip PIN if staff authorizes, 
-  // but for QR Rieng or QR Chung, we follow rules.
+  // Manual check-in by staff can override PIN if needed (handled by UI flow or policy)
+  // But if it comes from QR scan (even DayPass), strict mode might require PIN.
+  // Requirement: "Nếu require_pin -> nhập PIN".
+  
   if (ticket.require_pin && method !== 'MANUAL') {
       if (!pin) {
           // Return special flag to UI to prompt PIN
@@ -224,10 +256,6 @@ export const performCheckIn = async (
   }
 
   // 4b. Atomic Update
-  // Note: Supabase JS doesn't support `remaining_uses = remaining_uses - 1` directly in update().
-  // In production, use an RPC function: await supabase.rpc('decrement_ticket', { t_id: ticketId })
-  // Here we simulate strict atomic check by optimistic locking or just executing update.
-  
   const newRemaining = ticket.remaining_uses - 1;
   const { error: updateError } = await supabase
     .from('tickets')
