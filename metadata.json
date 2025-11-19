@@ -1,0 +1,7 @@
+{
+  "name": "Winson Check-in (Yoga An An)",
+  "description": "A PWA-ready check-in and management system for Yoga studios featuring public QR self-check-in, private QR ticket management, and comprehensive dashboards for Owners, Staff, and Customers.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
