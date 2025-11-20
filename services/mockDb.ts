@@ -155,6 +155,23 @@ export const generateDayPassToken = async (ticketId: string): Promise<string> =>
     return btoa(payload);
 };
 
+// New: Fixed QR containing Customer Info, Type, Remaining
+export const generateStaticTicketQR = async (ticket: Ticket): Promise<string> => {
+    // Signature ensures this "Membership Card" wasn't forged
+    const signature = mockHmac(`${ticket.ticket_id}|${ticket.owner_phone}|static_card|${HMAC_SECRET}`);
+    
+    const payload = JSON.stringify({
+        id: ticket.ticket_id,
+        name: ticket.owner_name,
+        phone: ticket.owner_phone,
+        type: ticket.type,
+        rem: ticket.remaining_uses,
+        card_type: 'static_card',
+        sig: signature
+    });
+    return btoa(payload);
+};
+
 // 3. Check-in Logic
 export const performCheckIn = async (
   identifier: string, 
@@ -170,7 +187,7 @@ export const performCheckIn = async (
   if (method === 'QR_RIENG') {
     try {
       const decoded = JSON.parse(atob(identifier));
-      const { id, ts, sig, type, date } = decoded;
+      const { id, ts, sig, type, date, card_type } = decoded;
       ticketId = id;
       
       if (type === 'daypass') {
@@ -183,6 +200,14 @@ export const performCheckIn = async (
           if (sig !== expectedSig) {
              return { success: false, message: 'Token DayPass không hợp lệ.' };
           }
+      } else if (card_type === 'static_card') {
+          // Validate Static Membership Card
+          const { phone } = decoded;
+          const expectedSig = mockHmac(`${id}|${phone}|static_card|${HMAC_SECRET}`);
+          if (sig !== expectedSig) {
+              return { success: false, message: 'Thẻ thành viên không hợp lệ/giả mạo.' };
+          }
+          // Static cards don't expire by timestamp, but we rely on DB status check below
       } else {
           // Validate Dynamic Token (Default)
           const expectedSig = mockHmac(`${id}|${ts}|${HMAC_SECRET}`);
@@ -219,9 +244,6 @@ export const performCheckIn = async (
   }
 
   // --- STEP 3: Validate PIN (If required) ---
-  // Manual check-in by staff can override PIN if needed (handled by UI flow or policy)
-  // But if it comes from QR scan (even DayPass), strict mode might require PIN.
-  // Requirement: "Nếu require_pin -> nhập PIN".
   
   if (ticket.require_pin && method !== 'MANUAL') {
       if (!pin) {
@@ -284,8 +306,8 @@ export const performCheckIn = async (
 };
 
 // 4. Admin Functions
-export const createTicket = async (data: Partial<Ticket>, ownerId: string) => {
-  const newTicket = {
+export const createTicket = async (data: Partial<Ticket>, performerId: string): Promise<Ticket | null> => {
+  const newTicket: Ticket = {
     ticket_id: `T${Date.now()}`,
     shop_id: 'anan',
     branch_id: 'anan1',
@@ -296,11 +318,18 @@ export const createTicket = async (data: Partial<Ticket>, ownerId: string) => {
     remaining_uses: data.total_uses || 12,
     expires_at: data.expires_at || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
     status: TicketStatus.ACTIVE,
-    require_pin: true
+    require_pin: true,
+    created_at: new Date().toISOString()
   };
 
-  await supabase.from('tickets').insert(newTicket);
-  await logAudit('CREATE_TICKET', ownerId, `Created ticket ${newTicket.ticket_id}`, newTicket.ticket_id);
+  const { error } = await supabase.from('tickets').insert(newTicket);
+  
+  if (error) {
+    console.error("Create Ticket Error", error);
+    return null;
+  }
+
+  await logAudit('CREATE_TICKET', performerId, `Created ticket ${newTicket.ticket_id}`, newTicket.ticket_id);
   return newTicket;
 };
 

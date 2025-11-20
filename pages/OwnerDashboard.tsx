@@ -3,12 +3,12 @@ import Layout from '../components/Layout';
 import { UserRole, Ticket, AuditLog, TicketType, User } from '../types';
 import { 
   getAllTickets, getDashboardStats, createTicket, toggleTicketLock, 
-  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES, generateDayPassToken 
+  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES, generateDayPassToken, generateStaticTicketQR 
 } from '../services/mockDb';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { 
   Users, CreditCard, AlertTriangle, Activity, Lock, Unlock, Key, 
-  FileDown, Plus, Search, Briefcase, Trash2, Edit, QrCode, X 
+  FileDown, Plus, Search, Briefcase, Trash2, Edit, QrCode, X, Printer 
 } from 'lucide-react';
 
 const OwnerDashboard: React.FC = () => {
@@ -22,15 +22,16 @@ const OwnerDashboard: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [showQrModal, setShowQrModal] = useState(false);
+  
+  // QR Modal State (Shared)
+  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket, title: string, subtitle?: string} | null>(null);
   
   // Form States
   const [newTicketPhone, setNewTicketPhone] = useState('');
+  const [newTicketName, setNewTicketName] = useState('');
   const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
   
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
-  const [qrTicket, setQrTicket] = useState<Ticket | null>(null);
-  const [qrToken, setQrToken] = useState('');
   
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
@@ -61,10 +62,28 @@ const OwnerDashboard: React.FC = () => {
   // --- TICKET ACTIONS ---
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createTicket({ owner_phone: newTicketPhone, type: newTicketType, total_uses: newTicketType === '12-buoi' ? 12 : 20 }, 'owner1');
+    const newTicket = await createTicket({ 
+        owner_phone: newTicketPhone, 
+        owner_name: newTicketName,
+        type: newTicketType, 
+        total_uses: newTicketType === '12-buoi' ? 12 : 20 
+    }, 'owner1');
+
     setShowCreateModal(false);
     setNewTicketPhone('');
-    loadData();
+    setNewTicketName('');
+    
+    if (newTicket) {
+        // Show Fixed QR immediately
+        const token = await generateStaticTicketQR(newTicket);
+        setQrModalData({
+            token,
+            ticket: newTicket,
+            title: "MEMBERSHIP CARD",
+            subtitle: "Fixed QR - Print for Customer"
+        });
+        loadData();
+    }
   };
 
   const handleEditTicketClick = (ticket: Ticket) => {
@@ -97,11 +116,14 @@ const OwnerDashboard: React.FC = () => {
     }
   };
   
-  const handleShowQr = async (ticket: Ticket) => {
+  const handleShowDayPass = async (ticket: Ticket) => {
       const token = await generateDayPassToken(ticket.ticket_id);
-      setQrToken(token);
-      setQrTicket(ticket);
-      setShowQrModal(true);
+      setQrModalData({
+          token,
+          ticket,
+          title: "DAY PASS",
+          subtitle: `Valid: ${new Date().toLocaleDateString()}`
+      });
   };
 
   // --- STAFF ACTIONS ---
@@ -235,7 +257,7 @@ const OwnerDashboard: React.FC = () => {
                             </td>
                             <td className="px-6 py-4 text-right space-x-2 flex justify-end">
                                 <button 
-                                    onClick={() => handleShowQr(t)}
+                                    onClick={() => handleShowDayPass(t)}
                                     className="p-1.5 hover:bg-purple-100 text-purple-600 rounded" title="Day Pass QR"
                                 >
                                     <QrCode size={16} />
@@ -374,6 +396,10 @@ const OwnerDashboard: React.FC = () => {
                         <input required type="tel" className="w-full border rounded p-2" value={newTicketPhone} onChange={e => setNewTicketPhone(e.target.value)} placeholder="09..." />
                     </div>
                     <div>
+                        <label className="block text-sm font-medium mb-1">Customer Name</label>
+                        <input required type="text" className="w-full border rounded p-2" value={newTicketName} onChange={e => setNewTicketName(e.target.value)} placeholder="Nguyen Van A" />
+                    </div>
+                    <div>
                         <label className="block text-sm font-medium mb-1">Ticket Type</label>
                         <select className="w-full border rounded p-2" value={newTicketType} onChange={e => setNewTicketType(e.target.value as TicketType)}>
                             <option value={TicketType.SESSION_12}>12 Sessions</option>
@@ -454,36 +480,38 @@ const OwnerDashboard: React.FC = () => {
         </div>
       )}
       
-       {/* QR Day Pass Modal */}
-       {showQrModal && qrTicket && (
+       {/* QR Modal (Shared for Day Pass and Membership Card) */}
+       {qrModalData && (
           <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden relative animate-in zoom-in-95 duration-200">
+             <div className="bg-white rounded-2xl w-full max-w-xs overflow-hidden relative animate-in zoom-in-95 duration-200">
                 <button 
-                  onClick={() => setShowQrModal(false)}
+                  onClick={() => setQrModalData(null)}
                   className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
                 >
                   <X size={20} />
                 </button>
                 
-                <div className="p-8 flex flex-col items-center text-center">
-                  <h3 className="font-bold text-xl mb-1 text-brand-600">DAY PASS</h3>
-                  <p className="font-medium text-gray-900">{qrTicket.owner_name}</p>
-                  <p className="text-gray-500 text-sm mb-6">{qrTicket.ticket_id}</p>
+                <div className="p-6 flex flex-col items-center text-center">
+                  <h3 className="font-bold text-lg mb-1 text-brand-600">{qrModalData.title}</h3>
+                  <p className="font-medium text-gray-900">{qrModalData.ticket.owner_name}</p>
+                  <p className="text-gray-500 text-sm mb-2">{qrModalData.ticket.ticket_id}</p>
+                  <p className="text-xs bg-gray-100 px-2 py-1 rounded mb-4">{qrModalData.ticket.type}</p>
                   
                   <div className="bg-white p-4 rounded-xl border-2 border-brand-500 shadow-lg mb-6">
                      <div className="w-48 h-48 bg-gray-900 flex flex-col items-center justify-center text-white text-[10px] break-all p-2 overflow-hidden">
                         <QrCode size={48} className="mb-2" />
-                        <span className="opacity-50">Scan Me</span>
-                        <span className="mt-2 font-mono leading-none">{qrToken.substring(0, 20)}...</span>
+                        <span className="mt-1 font-mono leading-none opacity-70" style={{fontSize: '8px', lineHeight: '10px', wordBreak: 'break-all'}}>
+                            {qrModalData.token.substring(0, 150)}...
+                        </span>
                      </div>
                   </div>
     
                   <div className="bg-orange-50 text-orange-800 px-4 py-2 rounded-lg text-sm font-medium w-full">
-                    Valid until: {new Date().toLocaleDateString()} 23:59
+                    {qrModalData.subtitle || `Valid: ${new Date().toLocaleDateString()}`}
                   </div>
                   
-                   <button onClick={() => window.print()} className="mt-4 text-brand-600 underline text-sm">
-                       Print This Pass
+                   <button onClick={() => window.print()} className="flex items-center justify-center mt-4 text-brand-600 text-sm font-bold">
+                       <Printer size={16} className="mr-2"/> Print
                    </button>
                 </div>
               </div>

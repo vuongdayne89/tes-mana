@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, CheckInLog, Ticket } from '../types';
-import { performCheckIn, getCheckInLogs, generateTicketToken, getTicketsByPhone, generateDayPassToken } from '../services/mockDb';
-import { Camera, Search, CheckCircle, XCircle, UserPlus, RefreshCw, KeyRound, User, QrCode, X, Printer } from 'lucide-react';
+import { UserRole, CheckInLog, Ticket, TicketType } from '../types';
+import { performCheckIn, getCheckInLogs, generateTicketToken, getTicketsByPhone, generateDayPassToken, createTicket, generateStaticTicketQR } from '../services/mockDb';
+import { Camera, Search, CheckCircle, XCircle, UserPlus, RefreshCw, KeyRound, User, QrCode, X, Printer, Plus } from 'lucide-react';
 import TicketCard from '../components/TicketCard';
 
 const StaffDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'list'>('scan');
+  const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'list' | 'create'>('scan');
   
   // Manual/Search State
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,8 +20,13 @@ const StaffDashboard: React.FC = () => {
   const [customerPin, setCustomerPin] = useState('');
   const [pendingToken, setPendingToken] = useState('');
   
-  // QR Day Pass Modal
-  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket} | null>(null);
+  // Create Ticket State
+  const [newTicketPhone, setNewTicketPhone] = useState('');
+  const [newTicketName, setNewTicketName] = useState('');
+  const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
+  
+  // QR Modal State (Shared for Day Pass and Static Membership Card)
+  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket, title: string, subtitle?: string} | null>(null);
 
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
     if (!idOrToken) return;
@@ -47,7 +52,6 @@ const StaffDashboard: React.FC = () => {
         getCheckInLogs().then(setLogs);
     } else if (pin) {
         // If PIN failed, keep PIN input open but show error
-        // optional: setRequirePin(false) if max retries reached logic exists in FE
     }
   };
   
@@ -66,9 +70,41 @@ const StaffDashboard: React.FC = () => {
       setSearchLoading(false);
   };
   
-  const handleGenerateQr = async (ticket: Ticket) => {
+  const handleGenerateDayPassQr = async (ticket: Ticket) => {
       const token = await generateDayPassToken(ticket.ticket_id);
-      setQrModalData({ token, ticket });
+      setQrModalData({ 
+          token, 
+          ticket, 
+          title: "DAY PASS", 
+          subtitle: `Valid: ${new Date().toLocaleDateString()}` 
+      });
+  };
+
+  const handleCreateTicket = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const newTicket = await createTicket({
+          owner_phone: newTicketPhone,
+          owner_name: newTicketName,
+          type: newTicketType,
+          total_uses: newTicketType === '12-buoi' ? 12 : newTicketType === '20-buoi' ? 20 : 30
+      }, 'staff1');
+
+      if (newTicket) {
+          // Generate Static Card QR immediately
+          const staticToken = await generateStaticTicketQR(newTicket);
+          setQrModalData({
+              token: staticToken,
+              ticket: newTicket,
+              title: "MEMBERSHIP CARD",
+              subtitle: "Fixed QR - Print for Customer"
+          });
+          // Reset form
+          setNewTicketPhone('');
+          setNewTicketName('');
+          setNewTicketType(TicketType.SESSION_12);
+      } else {
+          setStatus({ msg: 'Failed to create ticket', success: false });
+      }
   };
 
   const handlePinSubmit = async (e: React.FormEvent) => {
@@ -94,22 +130,28 @@ const StaffDashboard: React.FC = () => {
     <Layout role={UserRole.STAFF} title="Staff: Lê Lợi Branch">
       
       {/* Tab Navigation */}
-      <div className="flex bg-white rounded-lg p-1 mb-6 shadow-sm border border-gray-200">
+      <div className="flex bg-white rounded-lg p-1 mb-6 shadow-sm border border-gray-200 overflow-x-auto">
         <button 
           onClick={() => { setActiveTab('scan'); setStatus(null); }}
-          className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'scan' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
+          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'scan' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
           QR Scan
         </button>
         <button 
           onClick={() => { setActiveTab('manual'); setStatus(null); }}
-          className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'manual' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
+          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'manual' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
-          Manage / Manual
+          Manage
+        </button>
+        <button 
+          onClick={() => { setActiveTab('create'); setStatus(null); }}
+          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'create' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
+        >
+          New Ticket
         </button>
          <button 
           onClick={() => setActiveTab('list')}
-          className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'list' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
+          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'list' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
         >
           Activity
         </button>
@@ -231,7 +273,7 @@ const StaffDashboard: React.FC = () => {
                                 <CheckCircle size={16} className="mr-2" /> Check In
                             </button>
                             <button 
-                                onClick={() => handleGenerateQr(t)}
+                                onClick={() => handleGenerateDayPassQr(t)}
                                 className="flex-1 bg-white border border-brand-600 text-brand-600 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 flex items-center justify-center"
                             >
                                 <QrCode size={16} className="mr-2" /> Issue QR Pass
@@ -241,6 +283,55 @@ const StaffDashboard: React.FC = () => {
                 ))}
             </div>
           </div>
+        )}
+
+        {activeTab === 'create' && (
+            <div className="max-w-md mx-auto space-y-6">
+                 <div className="text-center">
+                    <h3 className="font-semibold text-gray-900">Create New Ticket</h3>
+                    <p className="text-sm text-gray-500">Issue tickets for walk-in customers</p>
+                </div>
+                <form onSubmit={handleCreateTicket} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Customer Phone</label>
+                        <input 
+                            required type="tel" 
+                            className="w-full border rounded-lg p-3" 
+                            value={newTicketPhone} 
+                            onChange={e => setNewTicketPhone(e.target.value)} 
+                            placeholder="09..." 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                        <input 
+                            required type="text" 
+                            className="w-full border rounded-lg p-3" 
+                            value={newTicketName} 
+                            onChange={e => setNewTicketName(e.target.value)} 
+                            placeholder="Nguyen Van A" 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Ticket Type</label>
+                        <select 
+                            className="w-full border rounded-lg p-3 bg-white" 
+                            value={newTicketType} 
+                            onChange={e => setNewTicketType(e.target.value as TicketType)}
+                        >
+                            <option value={TicketType.SESSION_12}>12 Sessions</option>
+                            <option value={TicketType.SESSION_20}>20 Sessions</option>
+                            <option value={TicketType.MONTHLY}>Monthly</option>
+                        </select>
+                    </div>
+                    <button 
+                        type="submit" 
+                        className="w-full bg-brand-600 text-white font-bold py-3 rounded-lg hover:bg-brand-700 transition-colors mt-4 flex items-center justify-center"
+                    >
+                        <Plus size={20} className="mr-2" /> Create Ticket
+                    </button>
+                </form>
+            </div>
         )}
 
         {activeTab === 'list' && (
@@ -270,8 +361,8 @@ const StaffDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Status Feedback Modal/Overlay */}
-        {status && activeTab !== 'list' && !requirePin && (
+        {/* Status Feedback */}
+        {status && (activeTab !== 'list' && activeTab !== 'scan') && (
           <div className="mt-6 p-4 rounded-lg bg-gray-50 border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-start">
               {status.success ? <CheckCircle className="text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="text-red-500 mr-3 flex-shrink-0" />}
@@ -285,7 +376,7 @@ const StaffDashboard: React.FC = () => {
           </div>
         )}
         
-        {/* QR Modal */}
+        {/* QR Modal (Universal for Day Pass and Static Card) */}
         {qrModalData && (
             <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 rounded-xl z-10 backdrop-blur-sm">
              <div className="bg-white rounded-2xl w-full max-w-xs overflow-hidden relative animate-in zoom-in-95 duration-200">
@@ -297,23 +388,27 @@ const StaffDashboard: React.FC = () => {
                 </button>
                 
                 <div className="p-6 flex flex-col items-center text-center">
-                  <h3 className="font-bold text-lg mb-1 text-brand-600">DAY PASS</h3>
+                  <h3 className="font-bold text-lg mb-1 text-brand-600">{qrModalData.title}</h3>
                   <p className="font-medium text-gray-900 text-sm">{qrModalData.ticket.owner_name}</p>
-                  <p className="text-gray-400 text-xs mb-4">{qrModalData.ticket.ticket_id}</p>
+                  <p className="text-gray-500 text-xs mb-1">{qrModalData.ticket.ticket_id}</p>
+                  <p className="text-xs bg-gray-100 px-2 py-1 rounded mb-4">{qrModalData.ticket.type}</p>
                   
                   <div className="bg-white p-2 rounded-lg border border-brand-500 shadow-md mb-4">
-                     <div className="w-40 h-40 bg-gray-900 flex flex-col items-center justify-center text-white text-[8px] break-all p-2 overflow-hidden">
+                     <div className="w-48 h-48 bg-gray-900 flex flex-col items-center justify-center text-white text-[8px] break-all p-2 overflow-hidden">
                         <QrCode size={32} className="mb-1" />
-                        <span className="mt-1 font-mono leading-none opacity-70">{qrModalData.token.substring(0, 16)}...</span>
+                        {/* We render the base64 string; in real app use QRCode component */}
+                        <span className="mt-1 font-mono leading-none opacity-70" style={{fontSize: '8px', lineHeight: '10px', wordBreak: 'break-all'}}>
+                            {qrModalData.token.substring(0, 150)}...
+                        </span>
                      </div>
                   </div>
     
                   <div className="bg-orange-50 text-orange-800 px-3 py-1 rounded text-xs font-medium w-full mb-3">
-                    Valid: {new Date().toLocaleDateString()}
+                    {qrModalData.subtitle || 'Scan this code at the counter'}
                   </div>
                   
                    <button onClick={() => window.print()} className="flex items-center justify-center text-brand-600 text-xs font-bold">
-                       <Printer size={14} className="mr-1"/> Print Pass
+                       <Printer size={14} className="mr-1"/> Print Card
                    </button>
                 </div>
               </div>
