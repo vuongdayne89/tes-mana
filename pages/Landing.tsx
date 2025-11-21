@@ -18,7 +18,7 @@ const Landing: React.FC = () => {
             <span className="text-3xl">🧘</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Winson Check-in</h1>
-          <p className="text-gray-500 mb-8">Yoga An An Management System</p>
+          <p className="text-gray-500 mb-8">Hệ thống quản lý Yoga An An</p>
 
           <div className="space-y-3">
              <button
@@ -26,7 +26,7 @@ const Landing: React.FC = () => {
               className="w-full flex items-center justify-center p-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl transition-colors font-semibold shadow-lg shadow-brand-200"
             >
               <QrCode className="mr-3" />
-              Public Check-in Station (QR Chung)
+              Trạm Check-in Tự động (Kiosk)
             </button>
             
             <div className="relative py-4">
@@ -34,7 +34,7 @@ const Landing: React.FC = () => {
                 <div className="w-full border-t border-gray-200"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or login as</span>
+                <span className="px-2 bg-white text-gray-500">Hoặc đăng nhập</span>
               </div>
             </div>
 
@@ -46,8 +46,8 @@ const Landing: React.FC = () => {
                 <Users size={20} />
               </div>
               <div>
-                <div className="font-medium text-gray-900">Customer</div>
-                <div className="text-xs text-gray-500">View tickets, history</div>
+                <div className="font-medium text-gray-900">Hội viên (Khách)</div>
+                <div className="text-xs text-gray-500">Xem vé, lịch sử tập</div>
               </div>
             </button>
 
@@ -59,8 +59,8 @@ const Landing: React.FC = () => {
                 <QrCode size={20} />
               </div>
               <div>
-                <div className="font-medium text-gray-900">Staff (Lê Lợi)</div>
-                <div className="text-xs text-gray-500">Scan tickets, manual check-in</div>
+                <div className="font-medium text-gray-900">Nhân viên / Lễ tân</div>
+                <div className="text-xs text-gray-500">Quét vé, tạo vé khách lẻ</div>
               </div>
             </button>
 
@@ -72,14 +72,14 @@ const Landing: React.FC = () => {
                 <LayoutDashboard size={20} />
               </div>
               <div>
-                <div className="font-medium text-gray-900">Owner</div>
-                <div className="text-xs text-gray-500">Analytics, reports, admin</div>
+                <div className="font-medium text-gray-900">Chủ phòng tập (Owner)</div>
+                <div className="text-xs text-gray-500">Báo cáo, quản trị hệ thống</div>
               </div>
             </button>
           </div>
         </div>
         <div className="bg-gray-50 p-4 text-center text-xs text-gray-400">
-          Demo Application for Winson
+          Phiên bản demo cho Yoga An An
         </div>
       </div>
     </div>

@@ -29,7 +29,7 @@ const Login: React.FC = () => {
       else if (user.role === UserRole.STAFF) navigate('/staff');
       else if (user.role === UserRole.OWNER) navigate('/owner');
     } else {
-      setError(loginError || 'Authentication failed.');
+      setError(loginError || 'Đăng nhập thất bại.');
     }
     
     setLoading(false);
@@ -46,16 +46,16 @@ const Login: React.FC = () => {
       <div className="flex-1 px-8 flex flex-col justify-center max-w-md mx-auto w-full">
         <div className="mb-6">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {roleParam === UserRole.OWNER ? 'Owner Login' : roleParam === UserRole.STAFF ? 'Staff Login' : 'Customer Login'}
+                {roleParam === UserRole.OWNER ? 'Chủ shop' : roleParam === UserRole.STAFF ? 'Nhân viên' : 'Hội viên'}
             </h1>
             <p className="text-gray-500">
-                {isStaffOrOwner ? 'Enter your credentials to manage the system.' : 'Enter your phone and PIN to access your tickets.'}
+                {isStaffOrOwner ? 'Nhập thông tin quản trị hệ thống.' : 'Nhập số điện thoại và mã PIN.'}
             </p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Số điện thoại</label>
             <input
               type="tel"
               value={phone}
@@ -64,13 +64,11 @@ const Login: React.FC = () => {
               placeholder="09xx xxx xxx"
               required
             />
-            {isStaffOrOwner && <p className="text-xs text-gray-400 mt-1">Demo: 0909000001 (Owner) / 0909000002 (Staff)</p>}
-            {!isStaffOrOwner && <p className="text-xs text-gray-400 mt-1">Demo: 0912345678</p>}
           </div>
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-                {isStaffOrOwner ? 'Password' : '4-Digit PIN'}
+                {isStaffOrOwner ? 'Mật khẩu' : 'Mã PIN (4 số)'}
             </label>
             <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -97,14 +95,13 @@ const Login: React.FC = () => {
             disabled={loading}
             className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-brand-200"
           >
-            {loading ? 'Verifying...' : 'Login'}
+            {loading ? 'Đang xử lý...' : 'Đăng nhập'}
           </button>
         </form>
         
-        {/* Switcher for convenience in Demo */}
         {!isStaffOrOwner && (
              <div className="mt-6 text-center text-sm text-gray-400">
-                <p>Forgot PIN? Contact staff at the counter.</p>
+                <p>Quên mã PIN? Liên hệ quầy lễ tân.</p>
             </div>
         )}
       </div>

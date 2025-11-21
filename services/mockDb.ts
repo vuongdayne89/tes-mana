@@ -10,8 +10,7 @@ export const BRANCHES: Branch[] = [
 const HMAC_SECRET = 'winson-secure-key-2024';
 
 // --- LOCAL STORAGE FALLBACK SYSTEM ---
-// Giúp app chạy được ngay cả khi chưa config Supabase
-const STORAGE_KEY = 'winson_db_v1';
+const STORAGE_KEY = 'winson_db_v3'; // Bump version to reset data
 
 interface LocalDB {
     users: User[];
@@ -24,13 +23,12 @@ const SEED_DB: LocalDB = {
     users: [
         { id: 'owner1', name: 'Nguyễn Văn Chủ', phone: '0909000001', role: UserRole.OWNER, password: 'admin123' },
         { id: 'staff1', name: 'Lê Văn Quản', phone: '0909000002', role: UserRole.STAFF, password: 'staff123', branch_id: 'anan1' },
-        { id: 'cust1', name: 'Chị Lan', phone: '0912345678', role: UserRole.CUSTOMER, pin_hash: '1234' },
-        { id: 'cust2', name: 'Anh Minh', phone: '0987654321', role: UserRole.CUSTOMER, pin_hash: '0000' }
+        { id: 'cust1', name: 'Chị Lan', phone: '0912345678', role: UserRole.CUSTOMER, pin_hash: '1234', identity_token: 'ID_0912345678' },
+        { id: 'cust2', name: 'Anh Minh', phone: '0987654321', role: UserRole.CUSTOMER, pin_hash: '0000', identity_token: 'ID_0987654321' }
     ],
     tickets: [
-        { ticket_id: 'T001', shop_id: 'anan', branch_id: 'anan1', owner_phone: '0912345678', owner_name: 'Chị Lan', type: TicketType.SESSION_20, total_uses: 20, remaining_uses: 15, expires_at: '2024-12-31T00:00:00Z', status: TicketStatus.ACTIVE, require_pin: true, created_at: '2024-01-01T00:00:00Z' },
-        { ticket_id: 'T002', shop_id: 'anan', branch_id: 'anan2', owner_phone: '0912345678', owner_name: 'Chị Lan', type: TicketType.MONTHLY, total_uses: 30, remaining_uses: 28, expires_at: '2023-12-01T00:00:00Z', status: TicketStatus.EXPIRED, require_pin: true, created_at: '2023-11-01T00:00:00Z' },
-        { ticket_id: 'T003', shop_id: 'anan', branch_id: 'anan1', owner_phone: '0987654321', owner_name: 'Anh Minh', type: TicketType.SESSION_12, total_uses: 12, remaining_uses: 12, expires_at: '2025-06-30T00:00:00Z', status: TicketStatus.ACTIVE, require_pin: true, created_at: '2024-03-01T00:00:00Z' }
+        { ticket_id: 'T001', shop_id: 'anan', branch_id: 'anan1', owner_phone: '0912345678', owner_name: 'Chị Lan', type: TicketType.SESSION_20, type_label: 'Gói 20 Buổi', total_uses: 20, remaining_uses: 15, expires_at: '2024-12-31T00:00:00Z', status: TicketStatus.ACTIVE, require_pin: true, created_at: '2024-01-01T00:00:00Z' },
+        { ticket_id: 'T003', shop_id: 'anan', branch_id: 'anan1', owner_phone: '0987654321', owner_name: 'Anh Minh', type: TicketType.SESSION_12, type_label: 'Gói 12 Buổi', total_uses: 12, remaining_uses: 12, expires_at: '2025-06-30T00:00:00Z', status: TicketStatus.ACTIVE, require_pin: true, created_at: '2024-03-01T00:00:00Z' }
     ],
     checkin_logs: [],
     audit_logs: []
@@ -75,39 +73,84 @@ const logAudit = async (action: AuditLog['action'], performerId: string, details
     }
 };
 
-// 1. AUTH
+// 1. AUTH & USERS
 export const login = async (phone: string, secret: string, requiredRole?: UserRole): Promise<{ user: User | null; error?: string }> => {
     let user: User | undefined;
     
     if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.from('users').select('*').eq('phone', phone).single();
-        if (error || !data) return { user: null, error: 'Số điện thoại không tồn tại' };
+        const { data } = await supabase.from('users').select('*').eq('phone', phone).single();
+        if (!data) return { user: null, error: 'Số điện thoại không tồn tại' };
         user = data as User;
     } else {
         const db = getLocalDB();
         user = db.users.find(u => u.phone === phone);
-        if (!user) return { user: null, error: 'Số điện thoại không tồn tại (Local)' };
+        if (!user) return { user: null, error: 'Số điện thoại không tồn tại' };
     }
 
     if (requiredRole && user.role !== requiredRole) {
-        return { user: null, error: `Tài khoản không có quyền ${requiredRole}` };
+        return { user: null, error: `Tài khoản không có quyền truy cập này` };
     }
 
     if (user.locked_until && new Date(user.locked_until) > new Date()) {
         const remaining = Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000);
-        return { user: null, error: `Bị khóa. Thử lại sau ${remaining} phút.` };
+        return { user: null, error: `Tài khoản bị khóa. Thử lại sau ${remaining} phút.` };
     }
 
     if (user.role === UserRole.CUSTOMER) {
         if (user.pin_hash !== secret) {
-            // Handle Lock Logic (Simplified for Hybrid)
-            return { user: null, error: 'Sai PIN' };
+            return { user: null, error: 'Mã PIN không đúng' };
         }
     } else {
         if (user.password !== secret) return { user: null, error: 'Mật khẩu không đúng' };
     }
 
     return { user };
+};
+
+export const registerCustomer = async (name: string, phone: string, pin: string, performerId: string) => {
+    const newUser: User = {
+        id: `u_${Date.now()}`,
+        name,
+        phone,
+        role: UserRole.CUSTOMER,
+        pin_hash: pin,
+        identity_token: `ID_${phone}`
+    };
+
+    if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('users').insert(newUser);
+        if (error) return { success: false, message: 'Số điện thoại đã tồn tại' };
+    } else {
+        const db = getLocalDB();
+        if (db.users.some(u => u.phone === phone)) return { success: false, message: 'Số điện thoại đã tồn tại' };
+        db.users.push(newUser);
+        saveLocalDB(db);
+    }
+
+    await logAudit('CREATE_CUSTOMER', performerId, `Created customer ${name} (${phone})`);
+    return { success: true, user: newUser };
+};
+
+export const getCustomers = async (): Promise<User[]> => {
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase.from('users').select('*').eq('role', UserRole.CUSTOMER);
+        return (data as User[]) || [];
+    } else {
+        return getLocalDB().users.filter(u => u.role === UserRole.CUSTOMER);
+    }
+};
+
+export const generateIdentityToken = (user: User) => {
+    // In real app, sign this with JWT. Here we use a simple mock format.
+    return `IDENTITY|${user.phone}|${mockHmac(user.phone + HMAC_SECRET)}`;
+};
+
+export const parseIdentityToken = (token: string): string | null => {
+    if (!token.startsWith('IDENTITY|')) return null;
+    const parts = token.split('|');
+    if (parts.length !== 3) return null;
+    // In real app, verify signature here
+    return parts[1]; // Return phone
 };
 
 export const changePin = async (phone: string, oldPin: string, newPin: string) => {
@@ -128,6 +171,66 @@ export const changePin = async (phone: string, oldPin: string, newPin: string) =
 };
 
 // 2. TICKETS
+export const createTicket = async (
+    data: { owner_phone: string, owner_name: string, type: TicketType, type_label?: string, custom_sessions?: number, custom_days?: number, specific_date?: string }, 
+    performerId: string
+): Promise<Ticket | null> => {
+    
+    let totalUses = 12;
+    let expiresAt = new Date();
+
+    // Calculate Uses
+    if (data.type === TicketType.SESSION_12) totalUses = 12;
+    else if (data.type === TicketType.SESSION_20) totalUses = 20;
+    else if (data.type === TicketType.MONTHLY) totalUses = 30;
+    else if (data.custom_sessions) totalUses = data.custom_sessions;
+
+    // Calculate Expiry
+    if (data.specific_date) {
+        expiresAt = new Date(data.specific_date);
+    } else if (data.custom_days) {
+        expiresAt.setDate(expiresAt.getDate() + data.custom_days);
+    } else {
+        // Default expiry logic
+        if (data.type === TicketType.MONTHLY) expiresAt.setDate(expiresAt.getDate() + 30);
+        else expiresAt.setDate(expiresAt.getDate() + 90); // Default 3 months
+    }
+    // Set to end of day
+    expiresAt.setHours(23, 59, 59, 999);
+
+    const newTicket: Ticket = {
+        ticket_id: `T${Date.now().toString().slice(-6)}`,
+        shop_id: 'anan', branch_id: 'anan1',
+        owner_phone: data.owner_phone, owner_name: data.owner_name,
+        type: data.type,
+        type_label: data.type_label || data.type.toUpperCase(),
+        total_uses: totalUses, remaining_uses: totalUses,
+        expires_at: expiresAt.toISOString(),
+        status: TicketStatus.ACTIVE, require_pin: true, created_at: new Date().toISOString()
+    };
+
+    if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('tickets').insert(newTicket);
+        if (error) { console.error(error); return null; }
+    } else {
+        const db = getLocalDB();
+        db.tickets.unshift(newTicket);
+        
+        // Ensure user exists (Auto-create if not) - Simplified logic
+        if (!db.users.find(u => u.phone === newTicket.owner_phone)) {
+            // This should ideally call registerCustomer, but for safety here:
+             db.users.push({
+                id: `u_${Date.now()}`, name: newTicket.owner_name, phone: newTicket.owner_phone, 
+                role: UserRole.CUSTOMER, pin_hash: '1234' 
+            });
+        }
+        saveLocalDB(db);
+    }
+    
+    await logAudit('CREATE_TICKET', performerId, `Tạo vé ${newTicket.ticket_id} (${newTicket.type_label})`);
+    return newTicket;
+};
+
 export const getTicketsByPhone = async (phone: string): Promise<Ticket[]> => {
     if (isSupabaseConfigured()) {
         const { data } = await supabase.from('tickets').select('*').eq('owner_phone', phone);
@@ -166,7 +269,7 @@ export const generateStaticTicketQR = async (ticket: Ticket) => {
         id: ticket.ticket_id,
         name: ticket.owner_name,
         phone: ticket.owner_phone,
-        type: ticket.type,
+        type: ticket.type_label,
         rem: ticket.remaining_uses,
         card_type: 'static_card',
         sig: signature
@@ -186,19 +289,17 @@ export const performCheckIn = async (
   let ticketId = identifier;
   let dbTicket: Ticket | undefined;
 
-  // Step 1: Decode Token
+  // Decode Token Logic
   if (method === 'QR_RIENG') {
       try {
           const decoded = JSON.parse(atob(identifier));
           ticketId = decoded.id;
-          // Simplified Validation for Demo Stability
-          // In production, strictly check signature here
       } catch (e) {
-          return { success: false, message: 'QR không hợp lệ' };
+          return { success: false, message: 'Mã QR không hợp lệ' };
       }
   }
 
-  // Step 2: Fetch Ticket
+  // Fetch Ticket
   if (isSupabaseConfigured()) {
       const { data } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
       if (!data) return { success: false, message: 'Vé không tồn tại' };
@@ -208,9 +309,11 @@ export const performCheckIn = async (
   }
 
   if (!dbTicket) return { success: false, message: 'Vé không tìm thấy' };
-  if (dbTicket.remaining_uses <= 0) return { success: false, message: 'Vé đã hết hạn sử dụng' };
+  if (dbTicket.remaining_uses <= 0) return { success: false, message: 'Vé đã hết lượt sử dụng' };
+  if (new Date(dbTicket.expires_at) < new Date()) return { success: false, message: 'Vé đã hết hạn' };
+  if (dbTicket.status === TicketStatus.LOCKED) return { success: false, message: 'Vé đang bị khóa' };
 
-  // Step 3: PIN Check
+  // PIN Check
   if (dbTicket.require_pin && method !== 'MANUAL') {
       if (!pin) return { success: false, message: 'Cần nhập PIN', requirePin: true };
       
@@ -223,10 +326,10 @@ export const performCheckIn = async (
           validPin = user?.pin_hash === pin;
       }
       
-      if (!validPin) return { success: false, message: 'PIN sai' };
+      if (!validPin) return { success: false, message: 'Mã PIN sai' };
   }
 
-  // Step 4: Update DB
+  // Deduct & Log
   const newRemaining = dbTicket.remaining_uses - 1;
   
   if (isSupabaseConfigured()) {
@@ -246,42 +349,10 @@ export const performCheckIn = async (
       saveLocalDB(db);
   }
 
-  return { success: true, message: 'Check-in thành công', remaining: newRemaining };
+  return { success: true, message: 'Check-in Thành Công', remaining: newRemaining };
 };
 
-// 4. ADMIN
-export const createTicket = async (data: Partial<Ticket>, performerId: string): Promise<Ticket | null> => {
-    const newTicket: Ticket = {
-        ticket_id: `T${Date.now().toString().slice(-6)}`,
-        shop_id: 'anan', branch_id: 'anan1',
-        owner_phone: data.owner_phone || '', owner_name: data.owner_name || 'Guest',
-        type: data.type || TicketType.SESSION_12,
-        total_uses: data.total_uses || 12, remaining_uses: data.total_uses || 12,
-        expires_at: new Date(Date.now() + 90*24*60*60*1000).toISOString(),
-        status: TicketStatus.ACTIVE, require_pin: true, created_at: new Date().toISOString()
-    };
-
-    if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('tickets').insert(newTicket);
-        if (error) { console.error(error); return null; }
-    } else {
-        const db = getLocalDB();
-        db.tickets.unshift(newTicket);
-        
-        // Also ensure user exists locally for PIN to work
-        if (!db.users.find(u => u.phone === newTicket.owner_phone)) {
-            db.users.push({
-                id: `u_${Date.now()}`, name: newTicket.owner_name, phone: newTicket.owner_phone, 
-                role: UserRole.CUSTOMER, pin_hash: '1234' // Default PIN
-            });
-        }
-        saveLocalDB(db);
-    }
-    
-    await logAudit('CREATE_TICKET', performerId, `Created ticket ${newTicket.ticket_id}`);
-    return newTicket;
-};
-
+// 4. ADMIN & STAFF
 export const updateTicket = async (ticketId: string, data: Partial<Ticket>, ownerId: string) => {
     if (isSupabaseConfigured()) {
         await supabase.from('tickets').update(data).eq('ticket_id', ticketId);
@@ -297,13 +368,16 @@ export const updateTicket = async (ticketId: string, data: Partial<Ticket>, owne
 };
 
 export const toggleTicketLock = async (ticketId: string, performerId: string) => {
-    // Simplified toggle logic
-    const db = isSupabaseConfigured() ? null : getLocalDB();
-    // Implementation skipped for brevity, follows same pattern
+    const db = getLocalDB();
+    const t = db.tickets.find(x => x.ticket_id === ticketId);
+    if (t) {
+        t.status = t.status === TicketStatus.LOCKED ? TicketStatus.ACTIVE : TicketStatus.LOCKED;
+        saveLocalDB(db);
+    }
 };
 
 export const resetPin = async (phone: string, performerId: string) => {
-    return changePin(phone, 'OLD_IGNORED', '1234');
+    return changePin(phone, 'IGNORE', '1234');
 };
 
 export const getStaffUsers = async (): Promise<User[]> => {
@@ -316,7 +390,8 @@ export const getStaffUsers = async (): Promise<User[]> => {
 
 export const addStaff = async (staffData: Partial<User>, performerId: string) => {
     const newUser = {
-        name: staffData.name || 'New Staff', phone: staffData.phone || '',
+        id: `staff_${Date.now()}`,
+        name: staffData.name || 'Nhân viên mới', phone: staffData.phone || '',
         role: UserRole.STAFF, branch_id: 'anan1', password: 'password123'
     };
     
@@ -324,19 +399,15 @@ export const addStaff = async (staffData: Partial<User>, performerId: string) =>
         await supabase.from('users').insert(newUser);
     } else {
         const db = getLocalDB();
-        db.users.push(newUser as User); // Needs ID gen in real code
+        db.users.push(newUser as User);
         saveLocalDB(db);
     }
 };
 
 export const removeStaff = async (staffId: string, performerId: string) => {
-    if (isSupabaseConfigured()) {
-        await supabase.from('users').delete().eq('id', staffId);
-    } else {
-        const db = getLocalDB();
-        db.users = db.users.filter(u => u.id !== staffId);
-        saveLocalDB(db);
-    }
+    const db = getLocalDB();
+    db.users = db.users.filter(u => u.id !== staffId);
+    saveLocalDB(db);
 };
 
 export const getCheckInLogs = async (): Promise<CheckInLog[]> => {
@@ -356,20 +427,13 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
 };
 
 export const getDashboardStats = async () => {
-    if (isSupabaseConfigured()) {
-        // Real DB Counts
-        const { count: total } = await supabase.from('checkin_logs').select('*', { count: 'exact', head: true });
-        const { count: active } = await supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'active');
-        return { totalCheckins: total || 0, activeTickets: active || 0, expiringSoon: 5, todayCheckins: 10 };
-    } else {
-        const db = getLocalDB();
-        return {
-            totalCheckins: db.checkin_logs.length,
-            activeTickets: db.tickets.filter(t => t.status === 'active').length,
-            expiringSoon: db.tickets.filter(t => t.remaining_uses < 3).length,
-            todayCheckins: db.checkin_logs.filter(l => l.timestamp.startsWith(new Date().toISOString().slice(0, 10))).length
-        };
-    }
+    const db = getLocalDB();
+    return {
+        totalCheckins: db.checkin_logs.length,
+        activeTickets: db.tickets.filter(t => t.status === 'active').length,
+        expiringSoon: db.tickets.filter(t => t.remaining_uses < 3).length,
+        todayCheckins: db.checkin_logs.filter(l => l.timestamp.startsWith(new Date().toISOString().slice(0, 10))).length
+    };
 };
 
 export const exportData = async (type: 'logs' | 'tickets', performerId: string) => {

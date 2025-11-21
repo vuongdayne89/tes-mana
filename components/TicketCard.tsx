@@ -14,7 +14,7 @@ const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick, selectable, se
   const isLocked = ticket.status === TicketStatus.LOCKED;
   
   const statusColor = isLocked ? 'bg-red-100 text-red-800' : isExpired ? 'bg-gray-100 text-gray-800' : 'bg-green-100 text-green-800';
-  const statusText = isLocked ? 'LOCKED' : isExpired ? 'EXPIRED' : 'ACTIVE';
+  const statusText = isLocked ? 'ĐÃ KHÓA' : isExpired ? 'HẾT HẠN' : 'ĐANG DÙNG';
 
   return (
     <div 
@@ -27,7 +27,7 @@ const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick, selectable, se
     >
       <div className="flex justify-between items-start mb-2">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{ticket.type.replace('-', ' ')}</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{ticket.type_label || ticket.type}</span>
           <h3 className="font-bold text-lg text-gray-900">{ticket.ticket_id}</h3>
         </div>
         <span className={`px-2 py-1 rounded text-xs font-bold ${statusColor}`}>
@@ -39,16 +39,16 @@ const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick, selectable, se
         <div className="flex items-center">
           <Zap size={16} className="mr-2 text-brand-500" />
           <span className="font-medium">
-            {ticket.remaining_uses} / {ticket.total_uses} sessions left
+            Còn {ticket.remaining_uses} / {ticket.total_uses} buổi
           </span>
         </div>
         <div className="flex items-center">
           <Calendar size={16} className="mr-2 text-gray-400" />
-          <span>Expires: {new Date(ticket.expires_at).toLocaleDateString()}</span>
+          <span>Hết hạn: {new Date(ticket.expires_at).toLocaleDateString('vi-VN')}</span>
         </div>
          <div className="flex items-center">
           <Clock size={16} className="mr-2 text-gray-400" />
-          <span>Branch: {ticket.branch_id}</span>
+          <span>Chi nhánh: {ticket.branch_id}</span>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { UserRole } from '../types';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Home, QrCode, PieChart, List, User } from 'lucide-react';
+import { LogOut, PieChart, List, User, QrCode } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -26,7 +26,7 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <h1 className="font-bold text-lg truncate">{title}</h1>
           {role && (
-            <button onClick={handleLogout} className="p-2 hover:bg-brand-700 rounded-full">
+            <button onClick={handleLogout} className="p-2 hover:bg-brand-700 rounded-full" title="Đăng xuất">
               <LogOut size={20} />
             </button>
           )}
@@ -38,24 +38,18 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
         {children}
       </main>
 
-      {/* Bottom Navigation (Mobile First) */}
+      {/* Bottom Navigation */}
       {role && (
-        <nav className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 pb-safe">
+        <nav className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 pb-safe z-40">
           <div className="flex justify-around items-center h-16 max-w-5xl mx-auto">
             
             {role === UserRole.CUSTOMER && (
               <>
                 <NavItem 
                   icon={<User size={24} />} 
-                  label="My Tickets" 
+                  label="Vé của tôi" 
                   active={isActive('/customer')} 
                   onClick={() => navigate('/customer')} 
-                />
-                <NavItem 
-                  icon={<List size={24} />} 
-                  label="History" 
-                  active={isActive('/customer/history')} 
-                  onClick={() => navigate('/customer/history')} 
                 />
               </>
             )}
@@ -64,13 +58,13 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
               <>
                 <NavItem 
                   icon={<QrCode size={24} />} 
-                  label="Scan" 
+                  label="Quét QR" 
                   active={isActive('/staff')} 
                   onClick={() => navigate('/staff')} 
                 />
                 <NavItem 
                   icon={<List size={24} />} 
-                  label="Activity" 
+                  label="Hoạt động" 
                   active={isActive('/staff/activity')} 
                   onClick={() => navigate('/staff/activity')} 
                 />
@@ -81,13 +75,13 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
               <>
                 <NavItem 
                   icon={<PieChart size={24} />} 
-                  label="Overview" 
+                  label="Tổng quan" 
                   active={isActive('/owner')} 
                   onClick={() => navigate('/owner')} 
                 />
                 <NavItem 
                   icon={<List size={24} />} 
-                  label="Tickets" 
+                  label="Vé" 
                   active={isActive('/owner/tickets')} 
                   onClick={() => navigate('/owner/tickets')} 
                 />

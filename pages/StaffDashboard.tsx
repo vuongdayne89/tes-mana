@@ -1,37 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, CheckInLog, Ticket, TicketType } from '../types';
-import { performCheckIn, getCheckInLogs, generateTicketToken, getTicketsByPhone, generateDayPassToken, createTicket, generateStaticTicketQR } from '../services/mockDb';
-import { Camera, Search, CheckCircle, XCircle, UserPlus, RefreshCw, KeyRound, User, QrCode, X, Printer, Plus } from 'lucide-react';
-import TicketCard from '../components/TicketCard';
+import { UserRole, CheckInLog, Ticket, TicketType, User } from '../types';
+import { 
+    performCheckIn, getCheckInLogs, getTicketsByPhone, generateDayPassToken, 
+    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, generateTicketToken 
+} from '../services/mockDb';
+import { Camera, Search, CheckCircle, XCircle, RefreshCw, KeyRound, QrCode, X, Printer, Plus, Users, Calendar } from 'lucide-react';
 
 const StaffDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'list' | 'create'>('scan');
+  const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'customers' | 'create' | 'list'>('scan');
   
-  // Manual/Search State
-  const [searchTerm, setSearchTerm] = useState('');
-  const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-
-  const [scanInput, setScanInput] = useState(''); // For demo: pasting the token
-  const [status, setStatus] = useState<{msg: string, success: boolean} | null>(null);
+  // State
   const [logs, setLogs] = useState<CheckInLog[]>([]);
+  const [customers, setCustomers] = useState<User[]>([]);
+  const [status, setStatus] = useState<{msg: string, success: boolean} | null>(null);
+  
+  // Scan & Manual
+  const [scanInput, setScanInput] = useState('');
   const [requirePin, setRequirePin] = useState(false);
   const [customerPin, setCustomerPin] = useState('');
   const [pendingToken, setPendingToken] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
   
-  // Create Ticket State
-  const [newTicketPhone, setNewTicketPhone] = useState('');
-  const [newTicketName, setNewTicketName] = useState('');
-  const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
+  // Create Ticket Form
+  const [ticketMode, setTicketMode] = useState<'existing' | 'new'>('existing');
+  const [targetPhone, setTargetPhone] = useState('');
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPin, setNewCustPin] = useState('');
   
-  // QR Modal State (Shared for Day Pass and Static Membership Card)
-  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket, title: string, subtitle?: string} | null>(null);
+  const [ticketType, setTicketType] = useState<TicketType>(TicketType.SESSION_12);
+  const [customSessions, setCustomSessions] = useState(10);
+  const [expiryMode, setExpiryMode] = useState<'default' | 'days' | 'date'>('default');
+  const [expiryValue, setExpiryValue] = useState<any>('');
+
+  // QR Modal
+  const [qrModalData, setQrModalData] = useState<{token: string, title: string, subtitle?: string} | null>(null);
+
+  useEffect(() => {
+    if (activeTab === 'list') getCheckInLogs().then(setLogs);
+    if (activeTab === 'customers') getCustomers().then(setCustomers);
+  }, [activeTab]);
+
+  // --- Handlers ---
 
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
     if (!idOrToken) return;
-    
-    // Reset status only if not in PIN flow
     if (!pin) setStatus(null);
     
     const res = await performCheckIn(idOrToken, method, 'anan1', 'staff1', pin);
@@ -48,371 +62,277 @@ const StaffDashboard: React.FC = () => {
         setRequirePin(false);
         setCustomerPin('');
         setPendingToken('');
-        // Refresh logs if successful
-        getCheckInLogs().then(setLogs);
-    } else if (pin) {
-        // If PIN failed, keep PIN input open but show error
     }
   };
-  
-  const handleSearch = async (e: React.FormEvent) => {
-      e.preventDefault();
-      setSearchLoading(true);
-      setStatus(null);
-      setFoundTickets([]);
+
+  const handleRegisterCustomer = async () => {
+      if (!newCustName || !targetPhone || !newCustPin) return alert('Vui lòng điền đủ thông tin');
+      const res = await registerCustomer(newCustName, targetPhone, newCustPin, 'staff1');
+      if (!res.success) return alert(res.message);
       
-      // Search by phone logic
-      if (searchTerm.length >= 3) {
-          const tickets = await getTicketsByPhone(searchTerm);
-          setFoundTickets(tickets);
-          if(tickets.length === 0) setStatus({msg: 'No tickets found', success: false});
+      // Auto generate identity QR
+      if (res.user) {
+          const token = generateIdentityToken(res.user);
+          setQrModalData({ token, title: "THẺ THÀNH VIÊN", subtitle: `Khách: ${res.user.name}` });
       }
-      setSearchLoading(false);
-  };
-  
-  const handleGenerateDayPassQr = async (ticket: Ticket) => {
-      const token = await generateDayPassToken(ticket.ticket_id);
-      setQrModalData({ 
-          token, 
-          ticket, 
-          title: "DAY PASS", 
-          subtitle: `Valid: ${new Date().toLocaleDateString()}` 
-      });
+      setTicketMode('existing'); // Switch to existing mode after create
+      getCustomers().then(setCustomers); // Refresh list
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
       e.preventDefault();
-      const newTicket = await createTicket({
-          owner_phone: newTicketPhone,
-          owner_name: newTicketName,
-          type: newTicketType,
-          total_uses: newTicketType === '12-buoi' ? 12 : newTicketType === '20-buoi' ? 20 : 30
-      }, 'staff1');
+      
+      const ticketData = {
+          owner_phone: targetPhone,
+          owner_name: newCustName || (customers.find(c => c.phone === targetPhone)?.name || 'Khách vãng lai'),
+          type: ticketType,
+          type_label: ticketType === TicketType.CUSTOM ? `Vé Tùy Chọn (${customSessions} buổi)` : undefined,
+          custom_sessions: ticketType === TicketType.CUSTOM ? customSessions : undefined,
+          custom_days: expiryMode === 'days' ? Number(expiryValue) : undefined,
+          specific_date: expiryMode === 'date' ? expiryValue : undefined
+      };
+
+      const newTicket = await createTicket(ticketData, 'staff1');
 
       if (newTicket) {
-          // Generate Static Card QR immediately
           const staticToken = await generateStaticTicketQR(newTicket);
           setQrModalData({
               token: staticToken,
-              ticket: newTicket,
-              title: "MEMBERSHIP CARD",
-              subtitle: "Fixed QR - Print for Customer"
+              title: "VÉ CỐ ĐỊNH (IN)",
+              subtitle: `Khách: ${newTicket.owner_name} - ${newTicket.type_label || newTicket.type}`
           });
-          // Reset form
-          setNewTicketPhone('');
-          setNewTicketName('');
-          setNewTicketType(TicketType.SESSION_12);
+          // Reset
+          setTargetPhone('');
+          setNewCustName('');
       } else {
-          setStatus({ msg: 'Failed to create ticket', success: false });
+          alert('Lỗi tạo vé');
       }
   };
 
-  const handlePinSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (customerPin.length === 4) {
-          await handleCheckIn(pendingToken, 'QR_RIENG', customerPin);
-      }
-  }
-
-  React.useEffect(() => {
-    if (activeTab === 'list') {
-      getCheckInLogs().then(setLogs);
-    }
-  }, [activeTab]);
-
-  // Helper for demo: Generate a valid token to test scanning easily
-  const copyDemoToken = async () => {
-      const token = await generateTicketToken('T003');
-      setScanInput(token);
-  }
-
   return (
-    <Layout role={UserRole.STAFF} title="Staff: Lê Lợi Branch">
+    <Layout role={UserRole.STAFF} title="Nhân Viên: Chi nhánh Lê Lợi">
       
-      {/* Tab Navigation */}
+      {/* Navigation Tabs */}
       <div className="flex bg-white rounded-lg p-1 mb-6 shadow-sm border border-gray-200 overflow-x-auto">
-        <button 
-          onClick={() => { setActiveTab('scan'); setStatus(null); }}
-          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'scan' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
-        >
-          QR Scan
-        </button>
-        <button 
-          onClick={() => { setActiveTab('manual'); setStatus(null); }}
-          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'manual' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
-        >
-          Manage
-        </button>
-        <button 
-          onClick={() => { setActiveTab('create'); setStatus(null); }}
-          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'create' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
-        >
-          New Ticket
-        </button>
-         <button 
-          onClick={() => setActiveTab('list')}
-          className={`flex-1 py-2 px-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${activeTab === 'list' ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
-        >
-          Activity
-        </button>
+        {[
+            {id: 'scan', label: 'Quét QR'},
+            {id: 'manual', label: 'Thủ Công'},
+            {id: 'customers', label: 'Khách Hàng'},
+            {id: 'create', label: 'Tạo Vé'},
+            {id: 'list', label: 'Lịch Sử'}
+        ].map(tab => (
+            <button 
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id as any); setStatus(null); }}
+                className={`flex-1 py-2 px-3 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
+            >
+                {tab.label}
+            </button>
+        ))}
       </div>
 
-      {/* Content */}
+      {/* Content Area */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] relative">
         
+        {/* SCAN TAB */}
         {activeTab === 'scan' && !requirePin && (
-          <div className="flex flex-col items-center justify-center h-full space-y-6">
-            <div className="w-full max-w-xs aspect-square bg-gray-900 rounded-2xl flex flex-col items-center justify-center text-gray-500 relative overflow-hidden mb-4">
+          <div className="flex flex-col items-center justify-center space-y-6">
+            <div className="w-64 h-64 bg-gray-900 rounded-2xl flex flex-col items-center justify-center text-gray-500 relative overflow-hidden">
               <Camera size={48} className="mb-2 opacity-50" />
-              <span className="text-sm">Camera Active</span>
+              <span className="text-sm">Camera đang bật...</span>
               <div className="absolute inset-0 border-2 border-brand-500 opacity-50 animate-pulse rounded-2xl"></div>
             </div>
-
-            {/* Demo Input for Token */}
-            <div className="w-full max-w-xs space-y-2">
+            <div className="w-full max-w-xs">
                 <input 
-                    type="text" 
-                    placeholder="Paste QR Token here..." 
-                    className="w-full text-xs p-2 border rounded bg-gray-50"
-                    value={scanInput}
-                    onChange={e => setScanInput(e.target.value)}
+                    type="text" placeholder="Paste QR Token..." 
+                    className="w-full text-xs p-2 border rounded mb-2"
+                    value={scanInput} onChange={e => setScanInput(e.target.value)}
                 />
-                <button 
-                onClick={() => handleCheckIn(scanInput, 'QR_RIENG')} 
-                disabled={!scanInput}
-                className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:bg-gray-300"
-                >
-                Validate Scanned QR
-                </button>
+                <button onClick={() => handleCheckIn(scanInput, 'QR_RIENG')} className="w-full py-3 bg-brand-600 text-white rounded-lg font-bold">Xác nhận QR</button>
+                <button onClick={async () => setScanInput(await generateTicketToken('T003'))} className="text-xs text-blue-500 mt-2 underline w-full text-center">Lấy mã Demo (T003)</button>
             </div>
-            
-             <button onClick={copyDemoToken} className="text-xs text-blue-500 underline mt-4">
-                Generate Valid Demo Token (T003) for Testing
-             </button>
           </div>
         )}
 
-        {/* PIN Prompt for Private QR */}
+        {/* PIN PROMPT */}
         {activeTab === 'scan' && requirePin && (
-            <div className="flex flex-col items-center justify-center h-full space-y-6 animate-in zoom-in">
-                <div className="p-4 bg-orange-50 text-orange-800 rounded-full">
-                    <KeyRound size={32} />
-                </div>
+            <div className="flex flex-col items-center justify-center space-y-6 animate-in zoom-in">
+                <div className="p-4 bg-orange-50 text-orange-800 rounded-full"><KeyRound size={32} /></div>
                 <div className="text-center">
-                    <h3 className="font-bold text-lg">Authentication Required</h3>
-                    <p className="text-gray-500 text-sm">Ticket requires PIN verification.</p>
-                    <p className="text-gray-500 text-sm">Please ask customer to enter their PIN.</p>
+                    <h3 className="font-bold text-lg">Yêu cầu xác thực</h3>
+                    <p className="text-gray-500 text-sm">Vui lòng mời khách nhập mã PIN 4 số.</p>
                 </div>
-                <form onSubmit={handlePinSubmit} className="w-full max-w-xs">
-                    <input 
-                        type="password" 
-                        maxLength={4}
-                        autoFocus
-                        className="w-full text-center text-3xl tracking-[1em] border-2 border-brand-500 rounded-lg p-3 mb-4"
-                        value={customerPin}
-                        onChange={e => setCustomerPin(e.target.value)}
-                        placeholder="••••"
-                    />
-                     <button 
-                        type="submit"
-                        disabled={customerPin.length !== 4}
-                        className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:bg-gray-300"
-                    >
-                        Confirm PIN
-                    </button>
-                     <button 
-                        type="button"
-                        onClick={() => { setRequirePin(false); setCustomerPin(''); setPendingToken(''); setStatus(null); }}
-                        className="w-full mt-2 py-2 text-gray-500"
-                    >
-                        Cancel
-                    </button>
-                </form>
+                <input 
+                    type="password" maxLength={4} autoFocus
+                    className="w-40 text-center text-3xl tracking-[0.5em] border-2 border-brand-500 rounded-lg p-2"
+                    value={customerPin} onChange={e => setCustomerPin(e.target.value)}
+                />
+                <button onClick={() => handleCheckIn(pendingToken, 'QR_RIENG', customerPin)} className="px-6 py-2 bg-brand-600 text-white rounded-lg">Xác Nhận</button>
+                <button onClick={() => {setRequirePin(false); setCustomerPin('')}} className="text-gray-500">Hủy</button>
             </div>
         )}
 
+        {/* MANUAL TAB */}
         {activeTab === 'manual' && (
           <div className="max-w-md mx-auto space-y-6">
-            <div className="text-center">
-              <h3 className="font-semibold text-gray-900">Lookup & Manual Entry</h3>
-              <p className="text-sm text-gray-500">Search by Phone to find tickets</p>
-            </div>
-            
-            <form onSubmit={handleSearch} className="relative">
+            <div className="relative">
               <Search className="absolute left-3 top-3 text-gray-400" size={20} />
               <input 
-                type="text" 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Enter Phone Number..."
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
+                type="text" placeholder="Nhập số điện thoại khách..."
+                className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-brand-500"
+                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               />
-              <button type="submit" className="hidden">Search</button>
-            </form>
+              <button 
+                onClick={() => getTicketsByPhone(searchTerm).then(setFoundTickets)}
+                className="absolute right-2 top-2 px-3 py-1 bg-gray-100 rounded text-sm hover:bg-gray-200"
+              >Tìm</button>
+            </div>
 
             <div className="space-y-3">
-                {searchLoading && <p className="text-center text-gray-500">Searching...</p>}
-                
                 {foundTickets.map(t => (
-                    <div key={t.ticket_id} className="border rounded-xl p-4 bg-gray-50">
-                        <div className="flex justify-between items-start mb-3">
-                            <div>
-                                <div className="font-bold">{t.owner_name}</div>
-                                <div className="text-xs text-gray-500">{t.ticket_id} • {t.type}</div>
-                            </div>
-                            <div className="text-right">
-                                <div className="font-bold text-brand-600">{t.remaining_uses} left</div>
-                            </div>
+                    <div key={t.ticket_id} className="border rounded-xl p-4 bg-gray-50 flex justify-between items-center">
+                        <div>
+                            <div className="font-bold">{t.owner_name}</div>
+                            <div className="text-xs text-gray-500">{t.type_label || t.type} • Còn {t.remaining_uses} buổi</div>
                         </div>
-                        
                         <div className="flex space-x-2">
-                            <button 
-                                onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')}
-                                className="flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700 flex items-center justify-center"
-                            >
-                                <CheckCircle size={16} className="mr-2" /> Check In
-                            </button>
-                            <button 
-                                onClick={() => handleGenerateDayPassQr(t)}
-                                className="flex-1 bg-white border border-brand-600 text-brand-600 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 flex items-center justify-center"
-                            >
-                                <QrCode size={16} className="mr-2" /> Issue QR Pass
-                            </button>
+                             <button onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')} className="p-2 bg-brand-600 text-white rounded hover:bg-brand-700" title="Check-in Ngay"><CheckCircle size={18} /></button>
+                             <button onClick={async () => {
+                                 const token = await generateDayPassToken(t.ticket_id);
+                                 setQrModalData({token, title: 'VÉ TRONG NGÀY', subtitle: 'Dùng để khách tự check-in hôm nay'});
+                             }} className="p-2 bg-white border text-brand-600 rounded hover:bg-gray-50" title="Tạo QR Ngày"><QrCode size={18} /></button>
                         </div>
                     </div>
                 ))}
+                {searchTerm && foundTickets.length === 0 && <p className="text-center text-gray-400">Không tìm thấy vé.</p>}
             </div>
           </div>
         )}
 
+        {/* CUSTOMERS TAB */}
+        {activeTab === 'customers' && (
+             <div className="overflow-x-auto">
+                 <table className="w-full text-sm text-left text-gray-500">
+                    <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                        <tr>
+                            <th className="px-4 py-3">Tên</th>
+                            <th className="px-4 py-3">SĐT</th>
+                            <th className="px-4 py-3 text-right">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {customers.map(c => (
+                            <tr key={c.id} className="border-b">
+                                <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                                <td className="px-4 py-3">{c.phone}</td>
+                                <td className="px-4 py-3 text-right">
+                                    <button onClick={() => {
+                                        const token = generateIdentityToken(c);
+                                        setQrModalData({token, title: 'THẺ THÀNH VIÊN', subtitle: c.name});
+                                    }} className="text-brand-600 hover:underline">Lấy QR</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                 </table>
+             </div>
+        )}
+
+        {/* CREATE TICKET TAB */}
         {activeTab === 'create' && (
             <div className="max-w-md mx-auto space-y-6">
-                 <div className="text-center">
-                    <h3 className="font-semibold text-gray-900">Create New Ticket</h3>
-                    <p className="text-sm text-gray-500">Issue tickets for walk-in customers</p>
+                {/* Step 1: Customer Info */}
+                <div className="bg-gray-50 p-4 rounded-lg border">
+                    <h4 className="font-bold text-sm mb-3 text-gray-700 flex items-center"><Users size={16} className="mr-2"/> Thông tin khách hàng</h4>
+                    <div className="flex space-x-2 mb-3 text-sm">
+                        <button onClick={() => setTicketMode('existing')} className={`flex-1 py-1 rounded ${ticketMode === 'existing' ? 'bg-white shadow text-brand-600 font-bold' : 'text-gray-500'}`}>Khách cũ</button>
+                        <button onClick={() => setTicketMode('new')} className={`flex-1 py-1 rounded ${ticketMode === 'new' ? 'bg-white shadow text-brand-600 font-bold' : 'text-gray-500'}`}>Đăng ký mới</button>
+                    </div>
+                    
+                    <input type="tel" placeholder="Số điện thoại" className="w-full p-2 border rounded mb-2" value={targetPhone} onChange={e => setTargetPhone(e.target.value)} />
+                    
+                    {ticketMode === 'new' && (
+                        <div className="space-y-2 animate-in fade-in">
+                            <input type="text" placeholder="Họ tên khách" className="w-full p-2 border rounded" value={newCustName} onChange={e => setNewCustName(e.target.value)} />
+                            <input type="text" placeholder="Tạo mã PIN (4 số)" className="w-full p-2 border rounded" maxLength={4} value={newCustPin} onChange={e => setNewCustPin(e.target.value)} />
+                            <button onClick={handleRegisterCustomer} className="w-full py-2 bg-blue-600 text-white rounded text-sm font-bold">Lưu Khách Hàng Mới</button>
+                        </div>
+                    )}
                 </div>
+
+                {/* Step 2: Ticket Config */}
                 <form onSubmit={handleCreateTicket} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Customer Phone</label>
-                        <input 
-                            required type="tel" 
-                            className="w-full border rounded-lg p-3" 
-                            value={newTicketPhone} 
-                            onChange={e => setNewTicketPhone(e.target.value)} 
-                            placeholder="09..." 
-                        />
+                    <h4 className="font-bold text-sm text-gray-700 flex items-center"><Calendar size={16} className="mr-2"/> Cấu hình vé</h4>
+                    
+                    <select className="w-full p-2 border rounded" value={ticketType} onChange={e => setTicketType(e.target.value as TicketType)}>
+                        <option value={TicketType.SESSION_12}>Gói 12 Buổi</option>
+                        <option value={TicketType.SESSION_20}>Gói 20 Buổi</option>
+                        <option value={TicketType.MONTHLY}>Vé Tháng (30 ngày)</option>
+                        <option value={TicketType.CUSTOM}>Tùy chọn khác...</option>
+                    </select>
+
+                    {ticketType === TicketType.CUSTOM && (
+                        <input type="number" placeholder="Số buổi" className="w-full p-2 border rounded" value={customSessions} onChange={e => setCustomSessions(Number(e.target.value))} />
+                    )}
+
+                    <div className="text-sm">
+                        <span className="block mb-1 text-gray-600">Hạn sử dụng:</span>
+                        <div className="flex space-x-2 mb-2">
+                            <button type="button" onClick={() => setExpiryMode('default')} className={`px-3 py-1 rounded border ${expiryMode === 'default' ? 'bg-brand-50 border-brand-500' : 'bg-white'}`}>Mặc định</button>
+                            <button type="button" onClick={() => setExpiryMode('days')} className={`px-3 py-1 rounded border ${expiryMode === 'days' ? 'bg-brand-50 border-brand-500' : 'bg-white'}`}>Số ngày</button>
+                            <button type="button" onClick={() => setExpiryMode('date')} className={`px-3 py-1 rounded border ${expiryMode === 'date' ? 'bg-brand-50 border-brand-500' : 'bg-white'}`}>Chọn ngày</button>
+                        </div>
+                        {expiryMode === 'days' && <input type="number" placeholder="Nhập số ngày (VD: 45)" className="w-full p-2 border rounded" onChange={e => setExpiryValue(e.target.value)} />}
+                        {expiryMode === 'date' && <input type="date" className="w-full p-2 border rounded" onChange={e => setExpiryValue(e.target.value)} />}
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
-                        <input 
-                            required type="text" 
-                            className="w-full border rounded-lg p-3" 
-                            value={newTicketName} 
-                            onChange={e => setNewTicketName(e.target.value)} 
-                            placeholder="Nguyen Van A" 
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Ticket Type</label>
-                        <select 
-                            className="w-full border rounded-lg p-3 bg-white" 
-                            value={newTicketType} 
-                            onChange={e => setNewTicketType(e.target.value as TicketType)}
-                        >
-                            <option value={TicketType.SESSION_12}>12 Sessions</option>
-                            <option value={TicketType.SESSION_20}>20 Sessions</option>
-                            <option value={TicketType.MONTHLY}>Monthly</option>
-                        </select>
-                    </div>
-                    <button 
-                        type="submit" 
-                        className="w-full bg-brand-600 text-white font-bold py-3 rounded-lg hover:bg-brand-700 transition-colors mt-4 flex items-center justify-center"
-                    >
-                        <Plus size={20} className="mr-2" /> Create Ticket
+
+                    <button type="submit" className="w-full py-3 bg-brand-600 text-white rounded-lg font-bold flex items-center justify-center">
+                        <Plus size={18} className="mr-2" /> Tạo Vé & In QR
                     </button>
                 </form>
             </div>
         )}
 
+        {/* LIST TAB */}
         {activeTab === 'list' && (
-          <div>
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800">Recent Activity</h3>
-                <button onClick={() => getCheckInLogs().then(setLogs)} className="p-2 hover:bg-gray-100 rounded-full">
-                    <RefreshCw size={16} />
-                </button>
-            </div>
-            <div className="space-y-3 max-h-[400px] overflow-y-auto">
-              {logs.map(log => (
-                <div key={log.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
-                  <div>
-                    <div className="flex items-center">
-                        <span className="font-medium text-gray-900 mr-2">{log.user_name}</span>
-                        {log.is_manual_by_staff && <span className="text-[10px] bg-yellow-100 text-yellow-800 px-1 rounded">MANUAL</span>}
+            <div className="space-y-2 overflow-y-auto max-h-[400px]">
+                {logs.map(l => (
+                    <div key={l.id} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                        <div>
+                            <div className="font-bold text-sm">{l.user_name}</div>
+                            <div className="text-xs text-gray-500">{new Date(l.timestamp).toLocaleString()}</div>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${l.status === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{l.status}</span>
                     </div>
-                    <div className="text-xs text-gray-500">{log.ticket_id} • {new Date(log.timestamp).toLocaleTimeString()}</div>
-                  </div>
-                  <div className={`px-2 py-1 rounded text-xs font-bold ${log.status === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {log.method}
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
-          </div>
         )}
 
-        {/* Status Feedback */}
-        {status && (activeTab !== 'list' && activeTab !== 'scan') && (
-          <div className="mt-6 p-4 rounded-lg bg-gray-50 border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
-            <div className="flex items-start">
-              {status.success ? <CheckCircle className="text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="text-red-500 mr-3 flex-shrink-0" />}
-              <div>
-                <h4 className={`font-bold ${status.success ? 'text-green-800' : 'text-red-800'}`}>
-                  {status.success ? 'Success' : 'Error'}
-                </h4>
-                <p className="text-sm text-gray-600 break-all">{status.msg}</p>
-              </div>
+        {/* Status Toast */}
+        {status && activeTab !== 'create' && activeTab !== 'customers' && (
+            <div className={`mt-4 p-3 rounded-lg flex items-center ${status.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                {status.success ? <CheckCircle size={20} className="mr-2" /> : <XCircle size={20} className="mr-2" />}
+                <span className="font-medium">{status.msg}</span>
             </div>
-          </div>
         )}
-        
-        {/* QR Modal (Universal for Day Pass and Static Card) */}
+
+        {/* Universal QR Modal */}
         {qrModalData && (
-            <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 rounded-xl z-10 backdrop-blur-sm">
-             <div className="bg-white rounded-2xl w-full max-w-xs overflow-hidden relative animate-in zoom-in-95 duration-200">
-                <button 
-                  onClick={() => setQrModalData(null)}
-                  className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
-                >
-                  <X size={20} />
-                </button>
-                
-                <div className="p-6 flex flex-col items-center text-center">
-                  <h3 className="font-bold text-lg mb-1 text-brand-600">{qrModalData.title}</h3>
-                  <p className="font-medium text-gray-900 text-sm">{qrModalData.ticket.owner_name}</p>
-                  <p className="text-gray-500 text-xs mb-1">{qrModalData.ticket.ticket_id}</p>
-                  <p className="text-xs bg-gray-100 px-2 py-1 rounded mb-4">{qrModalData.ticket.type}</p>
-                  
-                  <div className="bg-white p-2 rounded-lg border border-brand-500 shadow-md mb-4">
-                     <div className="w-48 h-48 bg-gray-900 flex flex-col items-center justify-center text-white text-[8px] break-all p-2 overflow-hidden">
-                        <QrCode size={32} className="mb-1" />
-                        {/* We render the base64 string; in real app use QRCode component */}
-                        <span className="mt-1 font-mono leading-none opacity-70" style={{fontSize: '8px', lineHeight: '10px', wordBreak: 'break-all'}}>
-                            {qrModalData.token.substring(0, 150)}...
-                        </span>
-                     </div>
-                  </div>
-    
-                  <div className="bg-orange-50 text-orange-800 px-3 py-1 rounded text-xs font-medium w-full mb-3">
-                    {qrModalData.subtitle || 'Scan this code at the counter'}
-                  </div>
-                  
-                   <button onClick={() => window.print()} className="flex items-center justify-center text-brand-600 text-xs font-bold">
-                       <Printer size={14} className="mr-1"/> Print Card
-                   </button>
+            <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                <div className="bg-white rounded-2xl w-full max-w-xs relative p-6 text-center">
+                    <button onClick={() => setQrModalData(null)} className="absolute top-3 right-3 p-1 bg-gray-100 rounded-full"><X size={20} /></button>
+                    <h3 className="font-bold text-lg text-brand-600 mb-1">{qrModalData.title}</h3>
+                    <p className="text-sm text-gray-700 mb-4">{qrModalData.subtitle}</p>
+                    <div className="bg-white border-2 border-brand-500 p-2 rounded-xl mb-4 inline-block">
+                        <QrCode size={150} />
+                        {/* Simulate QR content */}
+                        <div className="text-[8px] text-gray-400 break-all h-8 overflow-hidden">{qrModalData.token.substring(0,50)}...</div>
+                    </div>
+                    <button onClick={() => window.print()} className="w-full py-2 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50">
+                        <Printer size={16} className="mr-2" /> In Mã
+                    </button>
                 </div>
-              </div>
-          </div>
+            </div>
         )}
       </div>
     </Layout>

@@ -8,7 +8,8 @@ export enum TicketType {
   SESSION_12 = '12-buoi',
   SESSION_20 = '20-buoi',
   MONTHLY = 'thang',
-  EVENT = 'su-kien'
+  EVENT = 'su-kien',
+  CUSTOM = 'tuy-chon' // Flexible option
 }
 
 export enum TicketStatus {
@@ -24,6 +25,7 @@ export interface Ticket {
   owner_phone: string;
   owner_name: string;
   type: TicketType;
+  type_label?: string; // Display name e.g., "Vé Tuần", "Gói 3 ngày"
   total_uses: number;
   remaining_uses: number;
   expires_at: string; // ISO date
@@ -38,10 +40,11 @@ export interface User {
   phone: string;
   role: UserRole;
   password?: string; // For Staff/Owner
-  pin_hash?: string; // For Customer (Mocked)
+  pin_hash?: string; // For Customer
   branch_id?: string; // For staff
   failed_pin_attempts?: number;
   locked_until?: string; // ISO date
+  identity_token?: string; // Static QR content for fast login
 }
 
 export interface CheckInLog {
@@ -59,7 +62,7 @@ export interface CheckInLog {
 
 export interface AuditLog {
   id: string;
-  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN';
+  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN' | 'CREATE_CUSTOMER';
   performer_id: string;
   target_id?: string; // ticket_id or user_id
   details: string;
