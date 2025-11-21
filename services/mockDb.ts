@@ -10,7 +10,7 @@ export const BRANCHES: Branch[] = [
 const HMAC_SECRET = 'winson-secure-key-2024';
 
 // --- LOCAL STORAGE FALLBACK SYSTEM ---
-const STORAGE_KEY = 'winson_db_v3'; // Bump version to reset data
+const STORAGE_KEY = 'winson_db_v4'; // Bump version to v4
 
 interface LocalDB {
     users: User[];
@@ -114,8 +114,11 @@ export const registerCustomer = async (name: string, phone: string, pin: string,
         phone,
         role: UserRole.CUSTOMER,
         pin_hash: pin,
-        identity_token: `ID_${phone}`
+        identity_token: '' // Will be generated below
     };
+    
+    // Generate identity token
+    newUser.identity_token = generateIdentityToken(newUser);
 
     if (isSupabaseConfigured()) {
         const { error } = await supabase.from('users').insert(newUser);
@@ -141,16 +144,32 @@ export const getCustomers = async (): Promise<User[]> => {
 };
 
 export const generateIdentityToken = (user: User) => {
-    // In real app, sign this with JWT. Here we use a simple mock format.
-    return `IDENTITY|${user.phone}|${mockHmac(user.phone + HMAC_SECRET)}`;
+    const payload = JSON.stringify({
+        type: 'identity',
+        phone: user.phone,
+        name: user.name,
+        sig: mockHmac(user.phone + HMAC_SECRET)
+    });
+    return btoa(payload);
 };
 
 export const parseIdentityToken = (token: string): string | null => {
-    if (!token.startsWith('IDENTITY|')) return null;
-    const parts = token.split('|');
-    if (parts.length !== 3) return null;
-    // In real app, verify signature here
-    return parts[1]; // Return phone
+    try {
+        // Attempt legacy format first
+        if (token.startsWith('IDENTITY|')) {
+            const parts = token.split('|');
+            return parts.length === 3 ? parts[1] : null;
+        }
+        
+        // Attempt JSON format
+        const json = JSON.parse(atob(token));
+        if (json.type === 'identity' && json.phone) {
+            return json.phone;
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
 };
 
 export const changePin = async (phone: string, oldPin: string, newPin: string) => {
@@ -218,10 +237,9 @@ export const createTicket = async (
         
         // Ensure user exists (Auto-create if not) - Simplified logic
         if (!db.users.find(u => u.phone === newTicket.owner_phone)) {
-            // This should ideally call registerCustomer, but for safety here:
              db.users.push({
                 id: `u_${Date.now()}`, name: newTicket.owner_name, phone: newTicket.owner_phone, 
-                role: UserRole.CUSTOMER, pin_hash: '1234' 
+                role: UserRole.CUSTOMER, pin_hash: '1234', identity_token: '' 
             });
         }
         saveLocalDB(db);

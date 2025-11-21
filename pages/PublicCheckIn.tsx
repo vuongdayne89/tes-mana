@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getTicketsByPhone, performCheckIn, login, parseIdentityToken } from '../services/mockDb';
 import { Ticket } from '../types';
 import TicketCard from '../components/TicketCard';
 import { AlertCircle, CheckCircle, Smartphone, KeyRound, QrCode } from 'lucide-react';
+import { Scanner } from '@yudiel/react-qr-scanner';
 
 const PublicCheckIn: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -19,7 +21,6 @@ const PublicCheckIn: React.FC = () => {
   
   // Identity QR Input
   const [showIdentityInput, setShowIdentityInput] = useState(false);
-  const [identityToken, setIdentityToken] = useState('');
 
   useEffect(() => {
      if (step === 4) {
@@ -36,7 +37,6 @@ const PublicCheckIn: React.FC = () => {
     setPin('');
     setTickets([]);
     setError('');
-    setIdentityToken('');
     setShowIdentityInput(false);
     setResult({ success: false, message: '' });
   };
@@ -48,15 +48,16 @@ const PublicCheckIn: React.FC = () => {
     setStep(2);
   };
   
-  const handleIdentityScan = () => {
-      // Mock Scanning: In real app use Camera
-      const parsedPhone = parseIdentityToken(identityToken);
-      if (parsedPhone) {
-          setPhone(parsedPhone);
-          setStep(2); // Move to PIN
-          setShowIdentityInput(false);
-      } else {
-          setError('Mã thẻ thành viên không hợp lệ');
+  const handleIdentityScan = (token: string) => {
+      if (token) {
+        const parsedPhone = parseIdentityToken(token);
+        if (parsedPhone) {
+            setPhone(parsedPhone);
+            setStep(2); // Move to PIN
+            setShowIdentityInput(false);
+        } else {
+            setError('Mã thẻ thành viên không hợp lệ');
+        }
       }
   };
 
@@ -150,20 +151,21 @@ const PublicCheckIn: React.FC = () => {
                  ) : (
                      <div className="space-y-4 text-center animate-in zoom-in">
                          <h3 className="font-bold">Quét Mã QR Thành Viên</h3>
-                         <input 
-                            type="text" 
-                            placeholder="Paste QR Content here..." 
-                            className="w-full p-3 border rounded"
-                            value={identityToken}
-                            onChange={e => setIdentityToken(e.target.value)}
-                            autoFocus
-                         />
-                         <button 
-                            onClick={handleIdentityScan}
-                            className="w-full py-3 bg-brand-600 text-white rounded-lg font-bold"
-                         >
-                            Xác nhận
-                         </button>
+                         <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-black mx-auto relative">
+                             <div className="absolute inset-0 z-10 border-2 border-brand-500 opacity-50 pointer-events-none"></div>
+                             <Scanner 
+                                onScan={(result) => {
+                                    if (result && result.length > 0) {
+                                        handleIdentityScan(result[0].rawValue);
+                                    }
+                                }}
+                                scanDelay={1000}
+                                components={{ audio: false, finder: false }}
+                                styles={{
+                                    container: { width: '100%', aspectRatio: '1/1' }
+                                }}
+                             />
+                         </div>
                          <button onClick={() => setShowIdentityInput(false)} className="text-gray-500 text-sm underline">Quay lại nhập SĐT</button>
                      </div>
                  )}

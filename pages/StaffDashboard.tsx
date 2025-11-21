@@ -1,11 +1,14 @@
+
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { UserRole, CheckInLog, Ticket, TicketType, User } from '../types';
 import { 
     performCheckIn, getCheckInLogs, getTicketsByPhone, generateDayPassToken, 
-    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, generateTicketToken 
+    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken
 } from '../services/mockDb';
-import { Camera, Search, CheckCircle, XCircle, RefreshCw, KeyRound, QrCode, X, Printer, Plus, Users, Calendar } from 'lucide-react';
+import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera } from 'lucide-react';
+import { Scanner } from '@yudiel/react-qr-scanner';
+import QRCode from "react-qr-code";
 
 const StaffDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'scan' | 'manual' | 'customers' | 'create' | 'list'>('scan');
@@ -16,12 +19,12 @@ const StaffDashboard: React.FC = () => {
   const [status, setStatus] = useState<{msg: string, success: boolean} | null>(null);
   
   // Scan & Manual
-  const [scanInput, setScanInput] = useState('');
   const [requirePin, setRequirePin] = useState(false);
   const [customerPin, setCustomerPin] = useState('');
   const [pendingToken, setPendingToken] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
+  const [pauseScan, setPauseScan] = useState(false);
   
   // Create Ticket Form
   const [ticketMode, setTicketMode] = useState<'existing' | 'new'>('existing');
@@ -40,13 +43,14 @@ const StaffDashboard: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'list') getCheckInLogs().then(setLogs);
     if (activeTab === 'customers') getCustomers().then(setCustomers);
+    if (activeTab === 'scan') setPauseScan(false);
+    else setPauseScan(true);
   }, [activeTab]);
 
   // --- Handlers ---
 
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
     if (!idOrToken) return;
-    if (!pin) setStatus(null);
     
     const res = await performCheckIn(idOrToken, method, 'anan1', 'staff1', pin);
     
@@ -58,11 +62,32 @@ const StaffDashboard: React.FC = () => {
 
     setStatus({ msg: res.message, success: res.success });
     if (res.success) {
-        setScanInput('');
         setRequirePin(false);
         setCustomerPin('');
         setPendingToken('');
+        // Temporary pause scan to show success message
+        setPauseScan(true);
+        setTimeout(() => setPauseScan(false), 3000);
     }
+  };
+
+  const handleScan = async (result: string) => {
+      if (!result || pauseScan) return;
+
+      // 1. Try to detect if it's an Identity Token (Customer Card)
+      const identityPhone = parseIdentityToken(result);
+      if (identityPhone) {
+          setPauseScan(true);
+          setSearchTerm(identityPhone);
+          const tickets = await getTicketsByPhone(identityPhone);
+          setFoundTickets(tickets);
+          setActiveTab('manual');
+          setStatus({ success: true, msg: `Đã nhận diện khách hàng: ${identityPhone}` });
+          return;
+      }
+
+      // 2. Assume it's a Ticket Token
+      handleCheckIn(result, 'QR_RIENG');
   };
 
   const handleRegisterCustomer = async () => {
@@ -137,20 +162,22 @@ const StaffDashboard: React.FC = () => {
         {/* SCAN TAB */}
         {activeTab === 'scan' && !requirePin && (
           <div className="flex flex-col items-center justify-center space-y-6">
-            <div className="w-64 h-64 bg-gray-900 rounded-2xl flex flex-col items-center justify-center text-gray-500 relative overflow-hidden">
-              <Camera size={48} className="mb-2 opacity-50" />
-              <span className="text-sm">Camera đang bật...</span>
-              <div className="absolute inset-0 border-2 border-brand-500 opacity-50 animate-pulse rounded-2xl"></div>
-            </div>
-            <div className="w-full max-w-xs">
-                <input 
-                    type="text" placeholder="Paste QR Token..." 
-                    className="w-full text-xs p-2 border rounded mb-2"
-                    value={scanInput} onChange={e => setScanInput(e.target.value)}
+            <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-black relative">
+                <div className="absolute inset-0 z-10 border-2 border-brand-500 opacity-50 pointer-events-none"></div>
+                <Scanner 
+                    onScan={(result) => {
+                        if (result && result.length > 0) {
+                            handleScan(result[0].rawValue);
+                        }
+                    }}
+                    scanDelay={2000}
+                    components={{ audio: false, finder: false }}
+                    styles={{
+                        container: { width: '100%', aspectRatio: '1/1' }
+                    }}
                 />
-                <button onClick={() => handleCheckIn(scanInput, 'QR_RIENG')} className="w-full py-3 bg-brand-600 text-white rounded-lg font-bold">Xác nhận QR</button>
-                <button onClick={async () => setScanInput(await generateTicketToken('T003'))} className="text-xs text-blue-500 mt-2 underline w-full text-center">Lấy mã Demo (T003)</button>
             </div>
+            <p className="text-sm text-gray-500 flex items-center"><Camera size={16} className="mr-2"/> Đưa mã QR vé hoặc thẻ thành viên vào khung</p>
           </div>
         )}
 
@@ -324,9 +351,7 @@ const StaffDashboard: React.FC = () => {
                     <h3 className="font-bold text-lg text-brand-600 mb-1">{qrModalData.title}</h3>
                     <p className="text-sm text-gray-700 mb-4">{qrModalData.subtitle}</p>
                     <div className="bg-white border-2 border-brand-500 p-2 rounded-xl mb-4 inline-block">
-                        <QrCode size={150} />
-                        {/* Simulate QR content */}
-                        <div className="text-[8px] text-gray-400 break-all h-8 overflow-hidden">{qrModalData.token.substring(0,50)}...</div>
+                        <QRCode value={qrModalData.token} size={150} />
                     </div>
                     <button onClick={() => window.print()} className="w-full py-2 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50">
                         <Printer size={16} className="mr-2" /> In Mã

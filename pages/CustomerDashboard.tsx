@@ -3,7 +3,8 @@ import Layout from '../components/Layout';
 import { UserRole, Ticket } from '../types';
 import { getTicketsByPhone, generateTicketToken, changePin } from '../services/mockDb';
 import TicketCard from '../components/TicketCard';
-import { QrCode, X, RefreshCw, Settings, Key } from 'lucide-react';
+import { X, RefreshCw, Settings, Key } from 'lucide-react';
+import QRCode from "react-qr-code";
 
 const CustomerDashboard: React.FC = () => {
   const userPhone = '0912345678'; 
@@ -99,9 +100,9 @@ const CustomerDashboard: React.FC = () => {
               
               <div className="bg-white p-4 rounded-xl border-2 border-brand-500 shadow-lg mb-6 relative">
                  {qrToken ? (
-                     <div className="w-48 h-48 bg-gray-900 flex flex-col items-center justify-center text-white text-[10px] break-all p-2 overflow-hidden">
-                        <QrCode size={48} className="mb-2" />
-                        <span className="opacity-50">Quét để check-in</span>
+                     <div className="flex flex-col items-center justify-center">
+                        <QRCode value={qrToken} size={192} />
+                        <span className="text-[10px] text-gray-400 mt-2">Quét để check-in</span>
                      </div>
                  ) : (
                      <div className="w-48 h-48 bg-gray-100 flex items-center justify-center">Đang tải...</div>
