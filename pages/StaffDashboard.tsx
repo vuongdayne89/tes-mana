@@ -6,7 +6,7 @@ import {
     performCheckIn, getCheckInLogs, getTicketsByPhone, generateDayPassToken, 
     createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken
 } from '../services/mockDb';
-import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera } from 'lucide-react';
+import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import QRCode from "react-qr-code";
 
@@ -157,33 +157,66 @@ const StaffDashboard: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] relative">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[500px] relative">
         
         {/* SCAN TAB */}
         {activeTab === 'scan' && !requirePin && (
           <div className="flex flex-col items-center justify-center space-y-6">
-            <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-black relative">
-                <div className="absolute inset-0 z-10 border-2 border-brand-500 opacity-50 pointer-events-none"></div>
-                <Scanner 
-                    onScan={(result) => {
-                        if (result && result.length > 0) {
-                            handleScan(result[0].rawValue);
-                        }
-                    }}
-                    scanDelay={2000}
-                    components={{ audio: false, finder: false }}
-                    styles={{
-                        container: { width: '100%', aspectRatio: '1/1' }
-                    }}
-                />
+            <div className="w-full max-w-sm bg-black rounded-2xl overflow-hidden shadow-lg relative aspect-square">
+                {/* Overlay Frame */}
+                <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
+                    <div className="w-64 h-64 border-2 border-brand-500/80 rounded-lg relative">
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-brand-500 -mt-1 -ml-1"></div>
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-brand-500 -mt-1 -mr-1"></div>
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-brand-500 -mb-1 -ml-1"></div>
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-brand-500 -mb-1 -mr-1"></div>
+                    </div>
+                </div>
+
+                {!pauseScan && (
+                    <Scanner 
+                        onScan={(result) => {
+                            if (result && result.length > 0) {
+                                handleScan(result[0].rawValue);
+                            }
+                        }}
+                        onError={(err) => {
+                            console.error(err);
+                            setStatus({ success: false, msg: 'Lỗi Camera: Hãy cấp quyền truy cập.' });
+                        }}
+                        scanDelay={1500}
+                        components={{ audio: false, finder: false }}
+                        constraints={{ facingMode: 'environment' }}
+                        styles={{
+                            container: { width: '100%', height: '100%' },
+                            video: { width: '100%', height: '100%', objectFit: 'cover' }
+                        }}
+                    />
+                )}
+                {pauseScan && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-white z-10">
+                        <div className="text-center">
+                            <CheckCircle className="mx-auto mb-2 text-green-500" size={48} />
+                            <p>Đang xử lý...</p>
+                        </div>
+                    </div>
+                )}
             </div>
-            <p className="text-sm text-gray-500 flex items-center"><Camera size={16} className="mr-2"/> Đưa mã QR vé hoặc thẻ thành viên vào khung</p>
+            <p className="text-sm text-gray-500 flex items-center">
+                <Camera size={16} className="mr-2"/> 
+                Đưa mã QR vé hoặc thẻ thành viên vào khung
+            </p>
+             {status?.success === false && (
+                 <button onClick={() => window.location.reload()} className="flex items-center text-brand-600 text-sm font-bold">
+                     <RefreshCw size={14} className="mr-1"/> Tải lại trang nếu Camera lỗi
+                 </button>
+             )}
           </div>
         )}
 
         {/* PIN PROMPT */}
         {activeTab === 'scan' && requirePin && (
-            <div className="flex flex-col items-center justify-center space-y-6 animate-in zoom-in">
+            <div className="flex flex-col items-center justify-center space-y-6 animate-in zoom-in py-10">
                 <div className="p-4 bg-orange-50 text-orange-800 rounded-full"><KeyRound size={32} /></div>
                 <div className="text-center">
                     <h3 className="font-bold text-lg">Yêu cầu xác thực</h3>
@@ -191,11 +224,13 @@ const StaffDashboard: React.FC = () => {
                 </div>
                 <input 
                     type="password" maxLength={4} autoFocus
-                    className="w-40 text-center text-3xl tracking-[0.5em] border-2 border-brand-500 rounded-lg p-2"
+                    className="w-40 text-center text-3xl tracking-[0.5em] border-2 border-brand-500 rounded-lg p-2 outline-none focus:ring-2 focus:ring-brand-200"
                     value={customerPin} onChange={e => setCustomerPin(e.target.value)}
                 />
-                <button onClick={() => handleCheckIn(pendingToken, 'QR_RIENG', customerPin)} className="px-6 py-2 bg-brand-600 text-white rounded-lg">Xác Nhận</button>
-                <button onClick={() => {setRequirePin(false); setCustomerPin('')}} className="text-gray-500">Hủy</button>
+                <div className="flex space-x-3">
+                    <button onClick={() => handleCheckIn(pendingToken, 'QR_RIENG', customerPin)} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold hover:bg-brand-700">Xác Nhận</button>
+                    <button onClick={() => {setRequirePin(false); setCustomerPin('')}} className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">Hủy</button>
+                </div>
             </div>
         )}
 

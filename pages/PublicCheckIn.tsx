@@ -151,7 +151,7 @@ const PublicCheckIn: React.FC = () => {
                  ) : (
                      <div className="space-y-4 text-center animate-in zoom-in">
                          <h3 className="font-bold">Quét Mã QR Thành Viên</h3>
-                         <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-black mx-auto relative">
+                         <div className="w-full max-w-sm bg-black rounded-2xl overflow-hidden mx-auto relative aspect-square shadow-lg">
                              <div className="absolute inset-0 z-10 border-2 border-brand-500 opacity-50 pointer-events-none"></div>
                              <Scanner 
                                 onScan={(result) => {
@@ -159,17 +159,21 @@ const PublicCheckIn: React.FC = () => {
                                         handleIdentityScan(result[0].rawValue);
                                     }
                                 }}
+                                onError={(err) => setError('Không thể truy cập Camera')}
                                 scanDelay={1000}
                                 components={{ audio: false, finder: false }}
+                                constraints={{ facingMode: 'environment' }}
                                 styles={{
-                                    container: { width: '100%', aspectRatio: '1/1' }
+                                    container: { width: '100%', height: '100%' },
+                                    video: { width: '100%', height: '100%', objectFit: 'cover' }
                                 }}
                              />
                          </div>
                          <button onClick={() => setShowIdentityInput(false)} className="text-gray-500 text-sm underline">Quay lại nhập SĐT</button>
+                         {error && <p className="text-red-500 text-xs">{error}</p>}
                      </div>
                  )}
-                 {error && <p className="text-red-500 text-center text-sm">{error}</p>}
+                 {error && !showIdentityInput && <p className="text-red-500 text-center text-sm">{error}</p>}
             </div>
           )}
 
