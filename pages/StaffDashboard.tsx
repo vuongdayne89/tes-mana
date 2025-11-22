@@ -3,11 +3,10 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { UserRole, CheckInLog, Ticket, TicketType, User, CustomerDetail } from '../types';
 import { 
-    performCheckIn, getCheckInLogs, getTicketsByPhone, generateDayPassToken, 
-    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken,
+    performCheckIn, getCheckInLogs, createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken,
     previewTicketToken, getCustomerFullDetails
 } from '../services/mockDb';
-import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw, Eye, Clock, User as UserIcon } from 'lucide-react';
+import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw, Eye, Clock } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import QRCode from "react-qr-code";
 
@@ -24,9 +23,8 @@ const StaffDashboard: React.FC = () => {
   const [customerPin, setCustomerPin] = useState('');
   const [pendingToken, setPendingToken] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
   const [pauseScan, setPauseScan] = useState(false);
-  const [scanPreview, setScanPreview] = useState<{ticket: Ticket, token: string} | null>(null);
+  const [scanPreview, setScanPreview] = useState<{ticket: Ticket, token: string, user?: User} | null>(null);
   
   // Customer Detail View
   const [viewingCustomer, setViewingCustomer] = useState<CustomerDetail | null>(null);
@@ -52,8 +50,6 @@ const StaffDashboard: React.FC = () => {
     else setPauseScan(true);
   }, [activeTab]);
 
-  // --- Handlers ---
-
   const handleCheckIn = async (idOrToken: string, method: 'QR_RIENG' | 'MANUAL', pin?: string) => {
     if (!idOrToken) return;
     
@@ -78,19 +74,23 @@ const StaffDashboard: React.FC = () => {
 
   const handleScan = async (result: string) => {
       if (!result || pauseScan) return;
+      
+      // Pause immediately to prevent multiple scans
       setPauseScan(true);
 
-      // 1. Try to detect if it's an Identity Token (Customer Card)
+      // 1. Try Identity Token
       const identityPhone = parseIdentityToken(result);
       if (identityPhone) {
           handleViewCustomer(identityPhone);
           return;
       }
 
-      // 2. Assume it's a Ticket Token -> PREVIEW
+      // 2. Ticket Token -> PREVIEW
       const preview = await previewTicketToken(result);
       if (preview.success && preview.ticket) {
-          setScanPreview({ ticket: preview.ticket, token: result });
+           // Fetch user details for better preview
+           const details = await getCustomerFullDetails(preview.ticket.owner_phone);
+           setScanPreview({ ticket: preview.ticket, token: result, user: details?.user });
       } else {
           setStatus({ success: false, msg: preview.message });
           setTimeout(() => setPauseScan(false), 2000);
@@ -101,9 +101,10 @@ const StaffDashboard: React.FC = () => {
       const details = await getCustomerFullDetails(phone);
       if (details) {
           setViewingCustomer(details);
+          setPauseScan(true);
       } else {
           alert('Không tìm thấy khách hàng');
-          setPauseScan(false);
+          if(activeTab === 'scan') setPauseScan(false);
       }
   };
 
@@ -128,9 +129,24 @@ const StaffDashboard: React.FC = () => {
   const handleCreateTicket = async (e: React.FormEvent) => {
       e.preventDefault();
       
+      let finalName = newCustName;
+
+      // Logic: If creating NEW customer, register them FIRST
+      if (ticketMode === 'new') {
+          const regRes = await registerCustomer(newCustName, targetPhone, newCustPin, 'staff1');
+          if (!regRes.success && regRes.message !== 'Số điện thoại đã tồn tại') {
+              alert('Lỗi tạo khách hàng: ' + regRes.message);
+              return;
+          }
+      } else {
+          // Existing
+          const exist = customers.find(c => c.phone === targetPhone);
+          finalName = exist ? exist.name : 'Khách vãng lai';
+      }
+      
       const ticketData = {
           owner_phone: targetPhone,
-          owner_name: newCustName || (customers.find(c => c.phone === targetPhone)?.name || 'Khách vãng lai'),
+          owner_name: finalName,
           type: ticketType,
           type_label: ticketType === TicketType.CUSTOM ? `Vé Tùy Chọn (${customSessions} buổi)` : undefined,
           custom_sessions: ticketType === TicketType.CUSTOM ? customSessions : undefined,
@@ -168,7 +184,7 @@ const StaffDashboard: React.FC = () => {
         ].map(tab => (
             <button 
                 key={tab.id}
-                onClick={() => { setActiveTab(tab.id as any); setStatus(null); setViewingCustomer(null); }}
+                onClick={() => { setActiveTab(tab.id as any); setStatus(null); setViewingCustomer(null); setScanPreview(null); }}
                 className={`flex-1 py-2 px-3 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
             >
                 {tab.label}
@@ -181,7 +197,7 @@ const StaffDashboard: React.FC = () => {
         
         {/* CUSTOMER DETAIL VIEW (OVERLAY) */}
         {viewingCustomer && (
-            <div className="absolute inset-0 z-30 bg-white p-6 rounded-xl animate-in slide-in-from-bottom-5">
+            <div className="absolute inset-0 z-30 bg-white p-6 rounded-xl animate-in slide-in-from-bottom-5 overflow-y-auto">
                 <button onClick={closeCustomerView} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
                 <div className="flex items-center mb-6 border-b pb-4">
                     <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 mr-4">
@@ -273,7 +289,7 @@ const StaffDashboard: React.FC = () => {
                     <Scanner 
                         onScan={(result) => { if (result && result.length > 0) handleScan(result[0].rawValue); }}
                         onError={(err) => setStatus({ success: false, msg: 'Lỗi Camera: Hãy cấp quyền truy cập.' })}
-                        scanDelay={2000}
+                        scanDelay={1000}
                         components={{ audio: false, finder: false }}
                         constraints={{ facingMode: 'environment' }}
                         styles={{ container: { width: '100%', height: '100%' }, video: { width: '100%', height: '100%', objectFit: 'cover' } }}
@@ -359,7 +375,6 @@ const StaffDashboard: React.FC = () => {
                         <div className="space-y-2 animate-in fade-in">
                             <input type="text" placeholder="Họ tên khách" className="w-full p-2 border rounded" value={newCustName} onChange={e => setNewCustName(e.target.value)} />
                             <input type="text" placeholder="Tạo mã PIN (4 số)" className="w-full p-2 border rounded" maxLength={4} value={newCustPin} onChange={e => setNewCustPin(e.target.value)} />
-                            <button onClick={handleRegisterCustomer} className="w-full py-2 bg-blue-600 text-white rounded text-sm font-bold">Lưu Khách Hàng Mới</button>
                         </div>
                     )}
                 </div>

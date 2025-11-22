@@ -1,13 +1,16 @@
+
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { UserRole, Ticket } from '../types';
-import { getTicketsByPhone, generateTicketToken, changePin } from '../services/mockDb';
+import { getTicketsByPhone, generateTicketToken, changePin, getSession } from '../services/mockDb';
 import TicketCard from '../components/TicketCard';
 import { X, RefreshCw, Settings, Key } from 'lucide-react';
 import QRCode from "react-qr-code";
 
 const CustomerDashboard: React.FC = () => {
-  const userPhone = '0912345678'; 
+  const navigate = useNavigate();
+  const [user, setUser] = useState(getSession());
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [qrToken, setQrToken] = useState<string>('');
@@ -18,12 +21,16 @@ const CustomerDashboard: React.FC = () => {
   const [pinMsg, setPinMsg] = useState('');
 
   useEffect(() => {
+    if (!user || user.role !== UserRole.CUSTOMER) {
+        navigate('/login?role=CUSTOMER');
+        return;
+    }
     const loadTickets = async () => {
-      const data = await getTicketsByPhone(userPhone);
+      const data = await getTicketsByPhone(user.phone);
       setTickets(data);
     };
     loadTickets();
-  }, []);
+  }, [user, navigate]);
 
   useEffect(() => {
     let interval: any;
@@ -41,11 +48,12 @@ const CustomerDashboard: React.FC = () => {
   const handleChangePin = async (e: React.FormEvent) => {
       e.preventDefault();
       setPinMsg('');
+      if (!user) return;
       if (newPin.length !== 4 || isNaN(Number(newPin))) {
           setPinMsg('PIN phải có 4 số');
           return;
       }
-      const res = await changePin(userPhone, oldPin, newPin);
+      const res = await changePin(user.phone, oldPin, newPin);
       setPinMsg(res.message);
       if (res.success) {
           setOldPin('');
@@ -53,6 +61,8 @@ const CustomerDashboard: React.FC = () => {
           setTimeout(() => setShowSettings(false), 2000);
       }
   }
+
+  if (!user) return null;
 
   return (
     <Layout role={UserRole.CUSTOMER} title="Vé Của Tôi">
@@ -64,12 +74,16 @@ const CustomerDashboard: React.FC = () => {
         </div>
 
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <h2 className="text-lg font-bold text-gray-800 mb-1">Xin chào, Chị Lan 👋</h2>
+          <h2 className="text-lg font-bold text-gray-800 mb-1">Xin chào, {user.name} 👋</h2>
           <p className="text-gray-500 text-sm">Chúc bạn một buổi tập tràn đầy năng lượng!</p>
         </div>
 
         <div className="space-y-4">
-          <h3 className="font-semibold text-gray-700">Danh sách vé</h3>
+          <div className="flex justify-between items-center">
+             <h3 className="font-semibold text-gray-700">Danh sách vé</h3>
+             <button onClick={() => window.location.reload()} className="text-xs text-brand-600 flex items-center"><RefreshCw size={12} className="mr-1"/> Làm mới</button>
+          </div>
+          
           {tickets.length === 0 ? (
             <p className="text-gray-500 text-center py-8">Bạn chưa có vé nào.</p>
           ) : (
