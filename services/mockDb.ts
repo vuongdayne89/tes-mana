@@ -1,5 +1,6 @@
+
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { Ticket, User, CheckInLog, Branch, UserRole, TicketType, TicketStatus, AuditLog } from '../types';
+import { Ticket, User, CheckInLog, Branch, UserRole, TicketType, TicketStatus, AuditLog, CustomerDetail } from '../types';
 
 // --- Constants ---
 export const BRANCHES: Branch[] = [
@@ -10,7 +11,7 @@ export const BRANCHES: Branch[] = [
 const HMAC_SECRET = 'winson-secure-key-2024';
 
 // --- LOCAL STORAGE FALLBACK SYSTEM ---
-const STORAGE_KEY = 'winson_db_v4'; // Bump version to v4
+const STORAGE_KEY = 'winson_db_v4'; 
 
 interface LocalDB {
     users: User[];
@@ -143,6 +144,30 @@ export const getCustomers = async (): Promise<User[]> => {
     }
 };
 
+export const getCustomerFullDetails = async (phone: string): Promise<CustomerDetail | null> => {
+    let user: User | undefined;
+    let tickets: Ticket[] = [];
+    let logs: CheckInLog[] = [];
+
+    if (isSupabaseConfigured()) {
+        const { data: u } = await supabase.from('users').select('*').eq('phone', phone).single();
+        if (!u) return null;
+        user = u as User;
+        const { data: t } = await supabase.from('tickets').select('*').eq('owner_phone', phone);
+        tickets = (t as Ticket[]) || [];
+        const { data: l } = await supabase.from('checkin_logs').select('*').eq('user_phone', phone).order('timestamp', { ascending: false });
+        logs = (l as CheckInLog[]) || [];
+    } else {
+        const db = getLocalDB();
+        user = db.users.find(u => u.phone === phone);
+        if (!user) return null;
+        tickets = db.tickets.filter(t => t.owner_phone === phone);
+        logs = db.checkin_logs.filter(l => l.user_phone === phone);
+    }
+
+    return { user, tickets, logs };
+};
+
 export const generateIdentityToken = (user: User) => {
     const payload = JSON.stringify({
         type: 'identity',
@@ -155,13 +180,10 @@ export const generateIdentityToken = (user: User) => {
 
 export const parseIdentityToken = (token: string): string | null => {
     try {
-        // Attempt legacy format first
         if (token.startsWith('IDENTITY|')) {
             const parts = token.split('|');
             return parts.length === 3 ? parts[1] : null;
         }
-        
-        // Attempt JSON format
         const json = JSON.parse(atob(token));
         if (json.type === 'identity' && json.phone) {
             return json.phone;
@@ -198,23 +220,19 @@ export const createTicket = async (
     let totalUses = 12;
     let expiresAt = new Date();
 
-    // Calculate Uses
     if (data.type === TicketType.SESSION_12) totalUses = 12;
     else if (data.type === TicketType.SESSION_20) totalUses = 20;
     else if (data.type === TicketType.MONTHLY) totalUses = 30;
     else if (data.custom_sessions) totalUses = data.custom_sessions;
 
-    // Calculate Expiry
     if (data.specific_date) {
         expiresAt = new Date(data.specific_date);
     } else if (data.custom_days) {
         expiresAt.setDate(expiresAt.getDate() + data.custom_days);
     } else {
-        // Default expiry logic
         if (data.type === TicketType.MONTHLY) expiresAt.setDate(expiresAt.getDate() + 30);
-        else expiresAt.setDate(expiresAt.getDate() + 90); // Default 3 months
+        else expiresAt.setDate(expiresAt.getDate() + 90); 
     }
-    // Set to end of day
     expiresAt.setHours(23, 59, 59, 999);
 
     const newTicket: Ticket = {
@@ -234,8 +252,6 @@ export const createTicket = async (
     } else {
         const db = getLocalDB();
         db.tickets.unshift(newTicket);
-        
-        // Ensure user exists (Auto-create if not) - Simplified logic
         if (!db.users.find(u => u.phone === newTicket.owner_phone)) {
              db.users.push({
                 id: `u_${Date.now()}`, name: newTicket.owner_name, phone: newTicket.owner_phone, 
@@ -295,7 +311,33 @@ export const generateStaticTicketQR = async (ticket: Ticket) => {
     return btoa(payload);
 };
 
-// 3. CHECK-IN
+// 3. CHECK-IN & PREVIEW
+export const previewTicketToken = async (identifier: string): Promise<{ success: boolean; ticket?: Ticket; message: string }> => {
+    let ticketId = identifier;
+    
+    // Decode logic same as performCheckIn but WITHOUT side effects
+    try {
+        const decoded = JSON.parse(atob(identifier));
+        if (decoded.id) ticketId = decoded.id;
+        else return { success: false, message: 'QR không hợp lệ' };
+    } catch (e) {
+        // If not JSON, assume it is raw ID if legacy? or just fail
+        // For this system, we assume all QRs are encoded
+    }
+
+    let dbTicket: Ticket | undefined;
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
+        if (data) dbTicket = data as Ticket;
+    } else {
+        dbTicket = getLocalDB().tickets.find(t => t.ticket_id === ticketId);
+    }
+
+    if (!dbTicket) return { success: false, message: 'Vé không tồn tại trong hệ thống' };
+    
+    return { success: true, ticket: dbTicket, message: 'Tìm thấy vé' };
+};
+
 export const performCheckIn = async (
   identifier: string, 
   method: 'QR_CHUNG' | 'QR_RIENG' | 'MANUAL',
@@ -353,7 +395,8 @@ export const performCheckIn = async (
   if (isSupabaseConfigured()) {
       await supabase.from('tickets').update({ remaining_uses: newRemaining }).eq('ticket_id', ticketId);
       await supabase.from('checkin_logs').insert({
-          ticket_id: ticketId, user_name: dbTicket.owner_name, method, branch_id: branchId, status: 'SUCCESS', is_manual_by_staff: method === 'MANUAL'
+          ticket_id: ticketId, user_name: dbTicket.owner_name, user_phone: dbTicket.owner_phone, 
+          method, branch_id: branchId, status: 'SUCCESS', is_manual_by_staff: method === 'MANUAL'
       });
   } else {
       const db = getLocalDB();

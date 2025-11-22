@@ -1,14 +1,15 @@
+
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, Ticket, AuditLog, TicketType, User } from '../types';
+import { UserRole, Ticket, AuditLog, TicketType, User, CustomerDetail } from '../types';
 import { 
   getAllTickets, getDashboardStats, createTicket, toggleTicketLock, 
-  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES, generateDayPassToken, generateStaticTicketQR 
+  resetPin, getAuditLogs, exportData, getStaffUsers, addStaff, removeStaff, updateTicket, BRANCHES, generateDayPassToken, generateStaticTicketQR, getCustomerFullDetails
 } from '../services/mockDb';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { 
   Users, CreditCard, AlertTriangle, Activity, Lock, Unlock, Key, 
-  FileDown, Plus, Search, Briefcase, Trash2, Edit, QrCode, X, Printer 
+  FileDown, Plus, Search, Briefcase, Trash2, Edit, QrCode, X, Printer, Clock 
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
@@ -45,6 +46,9 @@ const OwnerDashboard: React.FC = () => {
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffBranch, setNewStaffBranch] = useState('anan1');
+  
+  const [searchPhone, setSearchPhone] = useState('');
+  const [viewingCustomer, setViewingCustomer] = useState<CustomerDetail | null>(null);
 
   const loadData = async () => {
     getDashboardStats().then(setStats);
@@ -66,6 +70,13 @@ const OwnerDashboard: React.FC = () => {
     { name: 'T7', checkins: 45 },
     { name: 'CN', checkins: 40 },
   ];
+
+  const handleSearchCustomer = async () => {
+      if(!searchPhone) return;
+      const details = await getCustomerFullDetails(searchPhone);
+      if(details) setViewingCustomer(details);
+      else alert('Không tìm thấy khách hàng');
+  };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,6 +169,47 @@ const OwnerDashboard: React.FC = () => {
         <button onClick={() => setActiveView('logs')} className={`px-4 py-2 font-medium text-sm border-b-2 whitespace-nowrap ${activeView === 'logs' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'}`}>Báo cáo</button>
       </div>
 
+      {/* CUSTOMER DETAIL VIEW MODAL */}
+      {viewingCustomer && (
+            <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
+                <div className="bg-white w-full max-w-2xl rounded-xl p-6 max-h-[90vh] overflow-y-auto relative">
+                    <button onClick={() => setViewingCustomer(null)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
+                    <div className="flex items-center mb-6 border-b pb-4">
+                        <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 mr-4">
+                            <Users size={32} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold">{viewingCustomer.user.name}</h2>
+                            <p className="text-gray-500 font-mono">{viewingCustomer.user.phone}</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <div>
+                            <h3 className="font-bold text-gray-700 mb-3">Danh sách vé</h3>
+                            {viewingCustomer.tickets.map(t => (
+                                <div key={t.ticket_id} className="border p-3 rounded-lg mb-2 bg-gray-50">
+                                    <div className="flex justify-between font-bold">
+                                        <span>{t.type_label || t.type}</span>
+                                        <span className={t.remaining_uses > 0 ? 'text-green-600' : 'text-red-500'}>{t.remaining_uses > 0 ? 'Active' : 'Expired'}</span>
+                                    </div>
+                                    <div className="text-sm">Còn: {t.remaining_uses} | Hết hạn: {new Date(t.expires_at).toLocaleDateString('vi-VN')}</div>
+                                </div>
+                            ))}
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-gray-700 mb-3">Lịch sử check-in</h3>
+                            {viewingCustomer.logs.slice(0, 10).map(l => (
+                                <div key={l.id} className="text-sm p-2 border-b flex justify-between">
+                                    <span>{new Date(l.timestamp).toLocaleString('vi-VN')}</span>
+                                    <span className={l.status === 'SUCCESS' ? 'text-green-600' : 'text-red-500'}>{l.status}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
       {activeView === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-500">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -186,8 +238,19 @@ const OwnerDashboard: React.FC = () => {
 
       {activeView === 'tickets' && (
           <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-gray-700">Danh sách vé ({tickets.length})</h3>
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                  <div className="flex items-center space-x-2">
+                      <h3 className="font-bold text-gray-700">Danh sách vé ({tickets.length})</h3>
+                      <div className="relative">
+                          <input 
+                            type="text" placeholder="Tìm SĐT khách..." 
+                            className="pl-8 pr-2 py-1 border rounded text-sm"
+                            value={searchPhone} onChange={e => setSearchPhone(e.target.value)}
+                          />
+                          <Search size={14} className="absolute left-2 top-2 text-gray-400" />
+                      </div>
+                      <button onClick={handleSearchCustomer} className="text-sm bg-gray-100 px-3 py-1 rounded hover:bg-gray-200">Xem Chi Tiết</button>
+                  </div>
                   <button onClick={() => setShowCreateModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow hover:bg-brand-700">
                       <Plus size={18} className="mr-2" /> Tạo Vé Mới
                   </button>

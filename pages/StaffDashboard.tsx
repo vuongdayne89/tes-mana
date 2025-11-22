@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, CheckInLog, Ticket, TicketType, User } from '../types';
+import { UserRole, CheckInLog, Ticket, TicketType, User, CustomerDetail } from '../types';
 import { 
     performCheckIn, getCheckInLogs, getTicketsByPhone, generateDayPassToken, 
-    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken
+    createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken,
+    previewTicketToken, getCustomerFullDetails
 } from '../services/mockDb';
-import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw } from 'lucide-react';
+import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw, Eye, Clock, User as UserIcon } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import QRCode from "react-qr-code";
 
@@ -25,7 +26,11 @@ const StaffDashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [foundTickets, setFoundTickets] = useState<Ticket[]>([]);
   const [pauseScan, setPauseScan] = useState(false);
+  const [scanPreview, setScanPreview] = useState<{ticket: Ticket, token: string} | null>(null);
   
+  // Customer Detail View
+  const [viewingCustomer, setViewingCustomer] = useState<CustomerDetail | null>(null);
+
   // Create Ticket Form
   const [ticketMode, setTicketMode] = useState<'existing' | 'new'>('existing');
   const [targetPhone, setTargetPhone] = useState('');
@@ -61,11 +66,11 @@ const StaffDashboard: React.FC = () => {
     }
 
     setStatus({ msg: res.message, success: res.success });
+    setScanPreview(null); // Close preview if open
     if (res.success) {
         setRequirePin(false);
         setCustomerPin('');
         setPendingToken('');
-        // Temporary pause scan to show success message
         setPauseScan(true);
         setTimeout(() => setPauseScan(false), 3000);
     }
@@ -73,21 +78,38 @@ const StaffDashboard: React.FC = () => {
 
   const handleScan = async (result: string) => {
       if (!result || pauseScan) return;
+      setPauseScan(true);
 
       // 1. Try to detect if it's an Identity Token (Customer Card)
       const identityPhone = parseIdentityToken(result);
       if (identityPhone) {
-          setPauseScan(true);
-          setSearchTerm(identityPhone);
-          const tickets = await getTicketsByPhone(identityPhone);
-          setFoundTickets(tickets);
-          setActiveTab('manual');
-          setStatus({ success: true, msg: `Đã nhận diện khách hàng: ${identityPhone}` });
+          handleViewCustomer(identityPhone);
           return;
       }
 
-      // 2. Assume it's a Ticket Token
-      handleCheckIn(result, 'QR_RIENG');
+      // 2. Assume it's a Ticket Token -> PREVIEW
+      const preview = await previewTicketToken(result);
+      if (preview.success && preview.ticket) {
+          setScanPreview({ ticket: preview.ticket, token: result });
+      } else {
+          setStatus({ success: false, msg: preview.message });
+          setTimeout(() => setPauseScan(false), 2000);
+      }
+  };
+
+  const handleViewCustomer = async (phone: string) => {
+      const details = await getCustomerFullDetails(phone);
+      if (details) {
+          setViewingCustomer(details);
+      } else {
+          alert('Không tìm thấy khách hàng');
+          setPauseScan(false);
+      }
+  };
+
+  const closeCustomerView = () => {
+      setViewingCustomer(null);
+      if (activeTab === 'scan') setPauseScan(false);
   };
 
   const handleRegisterCustomer = async () => {
@@ -95,13 +117,12 @@ const StaffDashboard: React.FC = () => {
       const res = await registerCustomer(newCustName, targetPhone, newCustPin, 'staff1');
       if (!res.success) return alert(res.message);
       
-      // Auto generate identity QR
       if (res.user) {
           const token = generateIdentityToken(res.user);
           setQrModalData({ token, title: "THẺ THÀNH VIÊN", subtitle: `Khách: ${res.user.name}` });
       }
-      setTicketMode('existing'); // Switch to existing mode after create
-      getCustomers().then(setCustomers); // Refresh list
+      setTicketMode('existing'); 
+      getCustomers().then(setCustomers); 
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -126,7 +147,6 @@ const StaffDashboard: React.FC = () => {
               title: "VÉ CỐ ĐỊNH (IN)",
               subtitle: `Khách: ${newTicket.owner_name} - ${newTicket.type_label || newTicket.type}`
           });
-          // Reset
           setTargetPhone('');
           setNewCustName('');
       } else {
@@ -148,7 +168,7 @@ const StaffDashboard: React.FC = () => {
         ].map(tab => (
             <button 
                 key={tab.id}
-                onClick={() => { setActiveTab(tab.id as any); setStatus(null); }}
+                onClick={() => { setActiveTab(tab.id as any); setStatus(null); setViewingCustomer(null); }}
                 className={`flex-1 py-2 px-3 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-brand-100 text-brand-700' : 'text-gray-500'}`}
             >
                 {tab.label}
@@ -159,11 +179,87 @@ const StaffDashboard: React.FC = () => {
       {/* Content Area */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[500px] relative">
         
+        {/* CUSTOMER DETAIL VIEW (OVERLAY) */}
+        {viewingCustomer && (
+            <div className="absolute inset-0 z-30 bg-white p-6 rounded-xl animate-in slide-in-from-bottom-5">
+                <button onClick={closeCustomerView} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
+                <div className="flex items-center mb-6 border-b pb-4">
+                    <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 mr-4">
+                        <Users size={32} />
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-bold">{viewingCustomer.user.name}</h2>
+                        <p className="text-gray-500 font-mono">{viewingCustomer.user.phone}</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 className="font-bold text-gray-700 mb-3 flex items-center"><QrCode size={18} className="mr-2"/> Danh sách vé</h3>
+                        <div className="space-y-3">
+                            {viewingCustomer.tickets.length === 0 && <p className="text-gray-400 text-sm">Khách chưa có vé.</p>}
+                            {viewingCustomer.tickets.map(t => (
+                                <div key={t.ticket_id} className={`border p-3 rounded-lg ${t.remaining_uses > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50'}`}>
+                                    <div className="flex justify-between">
+                                        <span className="font-bold">{t.type_label || t.type}</span>
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${t.remaining_uses > 0 ? 'bg-white text-green-600' : 'bg-gray-200 text-gray-500'}`}>
+                                            {t.remaining_uses > 0 ? 'Đang dùng' : 'Hết hạn'}
+                                        </span>
+                                    </div>
+                                    <div className="text-sm mt-1 flex justify-between">
+                                        <span>Còn: <b>{t.remaining_uses}/{t.total_uses}</b></span>
+                                        <span className="text-xs text-gray-500">Hạn: {new Date(t.expires_at).toLocaleDateString('vi-VN')}</span>
+                                    </div>
+                                    {t.remaining_uses > 0 && (
+                                        <button onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')} className="mt-2 w-full py-1 bg-brand-600 text-white text-xs font-bold rounded">Check-in vé này</button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-gray-700 mb-3 flex items-center"><Clock size={18} className="mr-2"/> Lịch sử gần đây</h3>
+                         <div className="space-y-2 max-h-60 overflow-y-auto">
+                            {viewingCustomer.logs.length === 0 && <p className="text-gray-400 text-sm">Chưa có lịch sử.</p>}
+                            {viewingCustomer.logs.slice(0, 10).map(l => (
+                                <div key={l.id} className="text-sm p-2 border-b flex justify-between">
+                                    <span className="text-gray-600">{new Date(l.timestamp).toLocaleDateString('vi-VN')}</span>
+                                    <span className={l.status === 'SUCCESS' ? 'text-green-600 font-bold' : 'text-red-500'}>{l.status}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* SCAN PREVIEW MODAL */}
+        {scanPreview && (
+            <div className="absolute inset-0 z-40 bg-black bg-opacity-80 flex items-center justify-center p-4 backdrop-blur-sm">
+                <div className="bg-white w-full max-w-sm rounded-2xl p-6 text-center animate-in zoom-in">
+                    <h3 className="text-xl font-bold text-gray-800 mb-1">Xác Nhận Check-in</h3>
+                    <p className="text-sm text-gray-500 mb-6">Thông tin vé được quét</p>
+                    
+                    <div className="bg-gray-50 p-4 rounded-xl border mb-6 text-left space-y-2">
+                        <div className="flex justify-between"><span className="text-gray-500 text-xs">Khách hàng:</span> <span className="font-bold">{scanPreview.ticket.owner_name}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500 text-xs">SĐT:</span> <span className="font-mono">{scanPreview.ticket.owner_phone}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500 text-xs">Loại vé:</span> <span className="text-brand-600 font-bold">{scanPreview.ticket.type_label}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500 text-xs">Còn lại:</span> <span className="font-bold">{scanPreview.ticket.remaining_uses} buổi</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500 text-xs">Hết hạn:</span> <span>{new Date(scanPreview.ticket.expires_at).toLocaleDateString('vi-VN')}</span></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => { setScanPreview(null); setPauseScan(false); }} className="py-3 bg-gray-200 text-gray-700 font-bold rounded-xl">Hủy Bỏ</button>
+                        <button onClick={() => handleCheckIn(scanPreview.token, 'QR_RIENG')} className="py-3 bg-brand-600 text-white font-bold rounded-xl shadow-lg shadow-brand-200">Check-in Ngay</button>
+                    </div>
+                </div>
+            </div>
+        )}
+        
         {/* SCAN TAB */}
-        {activeTab === 'scan' && !requirePin && (
+        {activeTab === 'scan' && !requirePin && !viewingCustomer && !scanPreview && (
           <div className="flex flex-col items-center justify-center space-y-6">
             <div className="w-full max-w-sm bg-black rounded-2xl overflow-hidden shadow-lg relative aspect-square">
-                {/* Overlay Frame */}
                 <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
                     <div className="w-64 h-64 border-2 border-brand-500/80 rounded-lg relative">
                         <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-brand-500 -mt-1 -ml-1"></div>
@@ -175,42 +271,17 @@ const StaffDashboard: React.FC = () => {
 
                 {!pauseScan && (
                     <Scanner 
-                        onScan={(result) => {
-                            if (result && result.length > 0) {
-                                handleScan(result[0].rawValue);
-                            }
-                        }}
-                        onError={(err) => {
-                            console.error(err);
-                            setStatus({ success: false, msg: 'Lỗi Camera: Hãy cấp quyền truy cập.' });
-                        }}
-                        scanDelay={1500}
+                        onScan={(result) => { if (result && result.length > 0) handleScan(result[0].rawValue); }}
+                        onError={(err) => setStatus({ success: false, msg: 'Lỗi Camera: Hãy cấp quyền truy cập.' })}
+                        scanDelay={2000}
                         components={{ audio: false, finder: false }}
                         constraints={{ facingMode: 'environment' }}
-                        styles={{
-                            container: { width: '100%', height: '100%' },
-                            video: { width: '100%', height: '100%', objectFit: 'cover' }
-                        }}
+                        styles={{ container: { width: '100%', height: '100%' }, video: { width: '100%', height: '100%', objectFit: 'cover' } }}
                     />
                 )}
-                {pauseScan && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-white z-10">
-                        <div className="text-center">
-                            <CheckCircle className="mx-auto mb-2 text-green-500" size={48} />
-                            <p>Đang xử lý...</p>
-                        </div>
-                    </div>
-                )}
             </div>
-            <p className="text-sm text-gray-500 flex items-center">
-                <Camera size={16} className="mr-2"/> 
-                Đưa mã QR vé hoặc thẻ thành viên vào khung
-            </p>
-             {status?.success === false && (
-                 <button onClick={() => window.location.reload()} className="flex items-center text-brand-600 text-sm font-bold">
-                     <RefreshCw size={14} className="mr-1"/> Tải lại trang nếu Camera lỗi
-                 </button>
-             )}
+            <p className="text-sm text-gray-500 flex items-center"><Camera size={16} className="mr-2"/> Đưa mã QR vào khung</p>
+             {status?.success === false && <button onClick={() => window.location.reload()} className="flex items-center text-brand-600 text-sm font-bold"><RefreshCw size={14} className="mr-1"/> Tải lại trang</button>}
           </div>
         )}
 
@@ -218,18 +289,15 @@ const StaffDashboard: React.FC = () => {
         {activeTab === 'scan' && requirePin && (
             <div className="flex flex-col items-center justify-center space-y-6 animate-in zoom-in py-10">
                 <div className="p-4 bg-orange-50 text-orange-800 rounded-full"><KeyRound size={32} /></div>
-                <div className="text-center">
-                    <h3 className="font-bold text-lg">Yêu cầu xác thực</h3>
-                    <p className="text-gray-500 text-sm">Vui lòng mời khách nhập mã PIN 4 số.</p>
-                </div>
+                <h3 className="font-bold text-lg">Yêu cầu xác thực PIN</h3>
                 <input 
                     type="password" maxLength={4} autoFocus
-                    className="w-40 text-center text-3xl tracking-[0.5em] border-2 border-brand-500 rounded-lg p-2 outline-none focus:ring-2 focus:ring-brand-200"
+                    className="w-40 text-center text-3xl tracking-[0.5em] border-2 border-brand-500 rounded-lg p-2 outline-none"
                     value={customerPin} onChange={e => setCustomerPin(e.target.value)}
                 />
                 <div className="flex space-x-3">
-                    <button onClick={() => handleCheckIn(pendingToken, 'QR_RIENG', customerPin)} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold hover:bg-brand-700">Xác Nhận</button>
-                    <button onClick={() => {setRequirePin(false); setCustomerPin('')}} className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">Hủy</button>
+                    <button onClick={() => handleCheckIn(pendingToken, 'QR_RIENG', customerPin)} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold">Xác Nhận</button>
+                    <button onClick={() => {setRequirePin(false); setCustomerPin(''); setPauseScan(false)}} className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg">Hủy</button>
                 </div>
             </div>
         )}
@@ -244,35 +312,14 @@ const StaffDashboard: React.FC = () => {
                 className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-brand-500"
                 value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               />
-              <button 
-                onClick={() => getTicketsByPhone(searchTerm).then(setFoundTickets)}
-                className="absolute right-2 top-2 px-3 py-1 bg-gray-100 rounded text-sm hover:bg-gray-200"
-              >Tìm</button>
+              <button onClick={() => handleViewCustomer(searchTerm)} className="absolute right-2 top-2 px-3 py-1 bg-gray-100 rounded text-sm hover:bg-gray-200">Tìm</button>
             </div>
-
-            <div className="space-y-3">
-                {foundTickets.map(t => (
-                    <div key={t.ticket_id} className="border rounded-xl p-4 bg-gray-50 flex justify-between items-center">
-                        <div>
-                            <div className="font-bold">{t.owner_name}</div>
-                            <div className="text-xs text-gray-500">{t.type_label || t.type} • Còn {t.remaining_uses} buổi</div>
-                        </div>
-                        <div className="flex space-x-2">
-                             <button onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')} className="p-2 bg-brand-600 text-white rounded hover:bg-brand-700" title="Check-in Ngay"><CheckCircle size={18} /></button>
-                             <button onClick={async () => {
-                                 const token = await generateDayPassToken(t.ticket_id);
-                                 setQrModalData({token, title: 'VÉ TRONG NGÀY', subtitle: 'Dùng để khách tự check-in hôm nay'});
-                             }} className="p-2 bg-white border text-brand-600 rounded hover:bg-gray-50" title="Tạo QR Ngày"><QrCode size={18} /></button>
-                        </div>
-                    </div>
-                ))}
-                {searchTerm && foundTickets.length === 0 && <p className="text-center text-gray-400">Không tìm thấy vé.</p>}
-            </div>
+            <p className="text-center text-gray-400 text-sm">Nhập SĐT chính xác để tìm kiếm và check-in.</p>
           </div>
         )}
 
         {/* CUSTOMERS TAB */}
-        {activeTab === 'customers' && (
+        {activeTab === 'customers' && !viewingCustomer && (
              <div className="overflow-x-auto">
                  <table className="w-full text-sm text-left text-gray-500">
                     <thead className="text-xs text-gray-700 uppercase bg-gray-50">
@@ -284,14 +331,11 @@ const StaffDashboard: React.FC = () => {
                     </thead>
                     <tbody>
                         {customers.map(c => (
-                            <tr key={c.id} className="border-b">
+                            <tr key={c.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => handleViewCustomer(c.phone)}>
                                 <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
                                 <td className="px-4 py-3">{c.phone}</td>
                                 <td className="px-4 py-3 text-right">
-                                    <button onClick={() => {
-                                        const token = generateIdentityToken(c);
-                                        setQrModalData({token, title: 'THẺ THÀNH VIÊN', subtitle: c.name});
-                                    }} className="text-brand-600 hover:underline">Lấy QR</button>
+                                    <button className="text-brand-600"><Eye size={16}/></button>
                                 </td>
                             </tr>
                         ))}
@@ -303,7 +347,6 @@ const StaffDashboard: React.FC = () => {
         {/* CREATE TICKET TAB */}
         {activeTab === 'create' && (
             <div className="max-w-md mx-auto space-y-6">
-                {/* Step 1: Customer Info */}
                 <div className="bg-gray-50 p-4 rounded-lg border">
                     <h4 className="font-bold text-sm mb-3 text-gray-700 flex items-center"><Users size={16} className="mr-2"/> Thông tin khách hàng</h4>
                     <div className="flex space-x-2 mb-3 text-sm">
@@ -312,7 +355,6 @@ const StaffDashboard: React.FC = () => {
                     </div>
                     
                     <input type="tel" placeholder="Số điện thoại" className="w-full p-2 border rounded mb-2" value={targetPhone} onChange={e => setTargetPhone(e.target.value)} />
-                    
                     {ticketMode === 'new' && (
                         <div className="space-y-2 animate-in fade-in">
                             <input type="text" placeholder="Họ tên khách" className="w-full p-2 border rounded" value={newCustName} onChange={e => setNewCustName(e.target.value)} />
@@ -322,10 +364,8 @@ const StaffDashboard: React.FC = () => {
                     )}
                 </div>
 
-                {/* Step 2: Ticket Config */}
                 <form onSubmit={handleCreateTicket} className="space-y-4">
                     <h4 className="font-bold text-sm text-gray-700 flex items-center"><Calendar size={16} className="mr-2"/> Cấu hình vé</h4>
-                    
                     <select className="w-full p-2 border rounded" value={ticketType} onChange={e => setTicketType(e.target.value as TicketType)}>
                         <option value={TicketType.SESSION_12}>Gói 12 Buổi</option>
                         <option value={TicketType.SESSION_20}>Gói 20 Buổi</option>
@@ -333,9 +373,7 @@ const StaffDashboard: React.FC = () => {
                         <option value={TicketType.CUSTOM}>Tùy chọn khác...</option>
                     </select>
 
-                    {ticketType === TicketType.CUSTOM && (
-                        <input type="number" placeholder="Số buổi" className="w-full p-2 border rounded" value={customSessions} onChange={e => setCustomSessions(Number(e.target.value))} />
-                    )}
+                    {ticketType === TicketType.CUSTOM && <input type="number" placeholder="Số buổi" className="w-full p-2 border rounded" value={customSessions} onChange={e => setCustomSessions(Number(e.target.value))} />}
 
                     <div className="text-sm">
                         <span className="block mb-1 text-gray-600">Hạn sử dụng:</span>
@@ -370,7 +408,6 @@ const StaffDashboard: React.FC = () => {
             </div>
         )}
 
-        {/* Status Toast */}
         {status && activeTab !== 'create' && activeTab !== 'customers' && (
             <div className={`mt-4 p-3 rounded-lg flex items-center ${status.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                 {status.success ? <CheckCircle size={20} className="mr-2" /> : <XCircle size={20} className="mr-2" />}
@@ -378,7 +415,6 @@ const StaffDashboard: React.FC = () => {
             </div>
         )}
 
-        {/* Universal QR Modal */}
         {qrModalData && (
             <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                 <div className="bg-white rounded-2xl w-full max-w-xs relative p-6 text-center">
@@ -388,9 +424,7 @@ const StaffDashboard: React.FC = () => {
                     <div className="bg-white border-2 border-brand-500 p-2 rounded-xl mb-4 inline-block">
                         <QRCode value={qrModalData.token} size={150} />
                     </div>
-                    <button onClick={() => window.print()} className="w-full py-2 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50">
-                        <Printer size={16} className="mr-2" /> In Mã
-                    </button>
+                    <button onClick={() => window.print()} className="w-full py-2 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50"><Printer size={16} className="mr-2" /> In Mã</button>
                 </div>
             </div>
         )}

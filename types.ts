@@ -1,3 +1,4 @@
+
 export enum UserRole {
   OWNER = 'OWNER',
   STAFF = 'STAFF',
@@ -74,4 +75,10 @@ export interface Branch {
   id: string;
   name: string;
   address: string;
+}
+
+export interface CustomerDetail {
+  user: User;
+  tickets: Ticket[];
+  logs: CheckInLog[];
 }
