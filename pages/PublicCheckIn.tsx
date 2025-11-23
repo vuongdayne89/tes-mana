@@ -161,7 +161,7 @@ const PublicCheckIn: React.FC = () => {
                                 }}
                                 onError={(err) => setError('Không thể truy cập Camera')}
                                 scanDelay={1000}
-                                components={{ audio: false, finder: false }}
+                                components={{ finder: false }}
                                 constraints={{ facingMode: 'environment' }}
                                 styles={{
                                     container: { width: '100%', height: '100%' },

@@ -33,16 +33,13 @@ const CustomerDashboard: React.FC = () => {
   }, [user, navigate]);
 
   useEffect(() => {
-    let interval: any;
     if (selectedTicket) {
       const updateToken = async () => {
         const token = await generateTicketToken(selectedTicket.ticket_id);
         setQrToken(token);
       };
       updateToken();
-      interval = setInterval(updateToken, 60000);
     }
-    return () => clearInterval(interval);
   }, [selectedTicket]);
 
   const handleChangePin = async (e: React.FormEvent) => {
@@ -124,8 +121,7 @@ const CustomerDashboard: React.FC = () => {
               </div>
 
               <div className="bg-blue-50 text-blue-800 px-4 py-2 rounded-lg text-sm font-medium w-full flex items-center justify-center">
-                <RefreshCw size={14} className="mr-2 animate-spin-slow" />
-                Mã tự động đổi sau 60s
+                Mã check-in cá nhân
               </div>
             </div>
           </div>

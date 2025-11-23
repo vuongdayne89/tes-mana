@@ -4,9 +4,9 @@ import Layout from '../components/Layout';
 import { UserRole, CheckInLog, Ticket, TicketType, User, CustomerDetail } from '../types';
 import { 
     performCheckIn, getCheckInLogs, createTicket, generateStaticTicketQR, getCustomers, registerCustomer, generateIdentityToken, parseIdentityToken,
-    previewTicketToken, getCustomerFullDetails
+    previewTicketToken, getCustomerFullDetails, deleteTicket
 } from '../services/mockDb';
-import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw, Eye, Clock } from 'lucide-react';
+import { Search, CheckCircle, XCircle, KeyRound, QrCode, X, Printer, Plus, Users, Calendar, Camera, RefreshCw, Eye, Clock, Trash2 } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import QRCode from "react-qr-code";
 
@@ -56,6 +56,7 @@ const StaffDashboard: React.FC = () => {
     const res = await performCheckIn(idOrToken, method, 'anan1', 'staff1', pin);
     
     if (res.requirePin) {
+        setScanPreview(null); // Close the preview modal first so we can see the PIN input
         setRequirePin(true);
         setPendingToken(idOrToken);
         return;
@@ -63,12 +64,27 @@ const StaffDashboard: React.FC = () => {
 
     setStatus({ msg: res.message, success: res.success });
     setScanPreview(null); // Close preview if open
+    
     if (res.success) {
         setRequirePin(false);
         setCustomerPin('');
         setPendingToken('');
         setPauseScan(true);
         setTimeout(() => setPauseScan(false), 3000);
+        
+        // If we are viewing customer details, refresh them to show updated ticket counts
+        if (viewingCustomer) {
+            const updatedDetails = await getCustomerFullDetails(viewingCustomer.user.phone);
+            if (updatedDetails) {
+                setViewingCustomer(updatedDetails);
+                alert(res.message); // Explicit feedback for manual entry
+            }
+        }
+    } else {
+        // If failed inside modal, show alert
+        if (viewingCustomer || method === 'MANUAL') {
+            alert(res.message);
+        }
     }
   };
 
@@ -124,6 +140,13 @@ const StaffDashboard: React.FC = () => {
       }
       setTicketMode('existing'); 
       getCustomers().then(setCustomers); 
+  };
+
+  const handleDeleteTicket = async (ticketId: string) => {
+      if (confirm('Bạn có chắc muốn XÓA vé này không?')) {
+          await deleteTicket(ticketId);
+          if (viewingCustomer) handleViewCustomer(viewingCustomer.user.phone); // refresh
+      }
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -226,9 +249,12 @@ const StaffDashboard: React.FC = () => {
                                         <span>Còn: <b>{t.remaining_uses}/{t.total_uses}</b></span>
                                         <span className="text-xs text-gray-500">Hạn: {new Date(t.expires_at).toLocaleDateString('vi-VN')}</span>
                                     </div>
-                                    {t.remaining_uses > 0 && (
-                                        <button onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')} className="mt-2 w-full py-1 bg-brand-600 text-white text-xs font-bold rounded">Check-in vé này</button>
-                                    )}
+                                    <div className="flex gap-2 mt-2">
+                                        {t.remaining_uses > 0 && (
+                                            <button onClick={() => handleCheckIn(t.ticket_id, 'MANUAL')} className="flex-1 py-1 bg-brand-600 text-white text-xs font-bold rounded hover:bg-brand-700">Check-in</button>
+                                        )}
+                                        <button onClick={() => handleDeleteTicket(t.ticket_id)} className="px-3 py-1 bg-red-100 text-red-600 text-xs font-bold rounded hover:bg-red-200"><Trash2 size={14}/></button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -239,7 +265,7 @@ const StaffDashboard: React.FC = () => {
                             {viewingCustomer.logs.length === 0 && <p className="text-gray-400 text-sm">Chưa có lịch sử.</p>}
                             {viewingCustomer.logs.slice(0, 10).map(l => (
                                 <div key={l.id} className="text-sm p-2 border-b flex justify-between">
-                                    <span className="text-gray-600">{new Date(l.timestamp).toLocaleDateString('vi-VN')}</span>
+                                    <span className="text-gray-600">{new Date(l.timestamp).toLocaleString('vi-VN')}</span>
                                     <span className={l.status === 'SUCCESS' ? 'text-green-600 font-bold' : 'text-red-500'}>{l.status}</span>
                                 </div>
                             ))}
@@ -290,7 +316,7 @@ const StaffDashboard: React.FC = () => {
                         onScan={(result) => { if (result && result.length > 0) handleScan(result[0].rawValue); }}
                         onError={(err) => setStatus({ success: false, msg: 'Lỗi Camera: Hãy cấp quyền truy cập.' })}
                         scanDelay={1000}
-                        components={{ audio: false, finder: false }}
+                        components={{ finder: false }}
                         constraints={{ facingMode: 'environment' }}
                         styles={{ container: { width: '100%', height: '100%' }, video: { width: '100%', height: '100%', objectFit: 'cover' } }}
                     />

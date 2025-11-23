@@ -1,5 +1,6 @@
 
 export enum UserRole {
+  SUPER_ADMIN = 'SUPER_ADMIN', // New Role
   OWNER = 'OWNER',
   STAFF = 'STAFF',
   CUSTOMER = 'CUSTOMER'
@@ -10,7 +11,7 @@ export enum TicketType {
   SESSION_20 = '20-buoi',
   MONTHLY = 'thang',
   EVENT = 'su-kien',
-  CUSTOM = 'tuy-chon' // Flexible option
+  CUSTOM = 'tuy-chon'
 }
 
 export enum TicketStatus {
@@ -19,17 +20,26 @@ export enum TicketStatus {
   LOCKED = 'locked'
 }
 
+export interface Tenant {
+  id: string;
+  name: string; // Brand Name (e.g., "Yoga An An")
+  status: 'active' | 'locked';
+  subscription_end: string;
+  created_at: string;
+}
+
 export interface Ticket {
   ticket_id: string;
-  shop_id: string;
+  tenant_id: string; // Linked to Tenant
+  shop_id: string; // Legacy support (alias for tenant in some contexts or sub-shop)
   branch_id: string;
   owner_phone: string;
   owner_name: string;
   type: TicketType;
-  type_label?: string; // Display name e.g., "Vé Tuần", "Gói 3 ngày"
+  type_label?: string;
   total_uses: number;
   remaining_uses: number;
-  expires_at: string; // ISO date
+  expires_at: string;
   status: TicketStatus;
   require_pin: boolean;
   created_at: string;
@@ -37,19 +47,21 @@ export interface Ticket {
 
 export interface User {
   id: string;
+  tenant_id?: string; // Null for Super Admin
   name: string;
   phone: string;
   role: UserRole;
-  password?: string; // For Staff/Owner
-  pin_hash?: string; // For Customer
-  branch_id?: string; // For staff
+  password?: string;
+  pin_hash?: string;
+  branch_id?: string;
   failed_pin_attempts?: number;
-  locked_until?: string; // ISO date
-  identity_token?: string; // Static QR content for fast login
+  locked_until?: string;
+  identity_token?: string;
 }
 
 export interface CheckInLog {
   id: string;
+  tenant_id: string;
   ticket_id: string;
   user_name: string;
   user_phone: string;
@@ -63,9 +75,10 @@ export interface CheckInLog {
 
 export interface AuditLog {
   id: string;
-  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN' | 'CREATE_CUSTOMER';
+  tenant_id: string;
+  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN' | 'CREATE_CUSTOMER' | 'UPDATE_BRAND';
   performer_id: string;
-  target_id?: string; // ticket_id or user_id
+  target_id?: string;
   details: string;
   timestamp: string;
   ip_address: string;
@@ -73,6 +86,7 @@ export interface AuditLog {
 
 export interface Branch {
   id: string;
+  tenant_id: string;
   name: string;
   address: string;
 }
