@@ -12,17 +12,22 @@ const HMAC_SECRET = 'winson-secure-key-2024';
 const STORAGE_KEY = 'winson_db_v5'; 
 const SESSION_KEY = 'winson_session_user';
 
-// --- UTILS (Fix Unicode Error) ---
-const safeEncode = (str: string) => {
-    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => {
-        return String.fromCharCode(parseInt(p1, 16));
-    }));
-};
-
-const safeDecode = (str: string) => {
-    return decodeURIComponent(Array.prototype.map.call(atob(str), (c: any) => {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join(''));
+// --- UTILS ---
+// Helper to parse JSON safely (handles both plain JSON and potential old Base64 legacy tokens if needed, though we prefer plain now)
+const tryParseJSON = (str: string) => {
+    try {
+        return JSON.parse(str);
+    } catch (e) {
+        // Fallback: try decoding if it looks like base64 (legacy support)
+        try {
+            const decoded = decodeURIComponent(Array.prototype.map.call(atob(str), (c: any) => {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(decoded);
+        } catch (e2) {
+            return null;
+        }
+    }
 };
 
 // --- LOCAL STORAGE FALLBACK SYSTEM ---
@@ -85,11 +90,6 @@ const mockHmac = (text: string): string => {
     return Math.abs(hash).toString(16);
 };
 
-const logAudit = async (action: AuditLog['action'], performerId: string, details: string, targetId?: string) => {
-    // Logic log (giữ nguyên)
-    console.log(`[AUDIT] ${action}: ${details}`);
-};
-
 // 1. AUTH & USERS
 export const login = async (phone: string, secret: string, requiredRole?: UserRole): Promise<{ user: User | null; error?: string }> => {
     let user: User | undefined;
@@ -133,7 +133,7 @@ export const registerCustomer = async (name: string, phone: string, pin: string,
 
     if (isSupabaseConfigured()) {
         const { error } = await supabase.from('users').insert(newUser);
-        if (error) return { success: false, message: error.message }; // Return exact Supabase error
+        if (error) return { success: false, message: error.message }; 
     } else {
         const db = getLocalDB();
         if (db.users.some(u => u.phone === phone)) return { success: false, message: 'Số điện thoại đã tồn tại' };
@@ -177,25 +177,23 @@ export const getCustomerFullDetails = async (phone: string): Promise<CustomerDet
 };
 
 export const generateIdentityToken = (user: User) => {
-    const payload = JSON.stringify({
-        type: 'identity',
-        phone: user.phone,
-        name: user.name,
-        sig: mockHmac(user.phone + HMAC_SECRET)
-    });
-    return safeEncode(payload);
+    // JSON thuần để app ngoài đọc được
+    const payload = {
+        "Thẻ": "Thành Viên",
+        "Tên": user.name,
+        "SĐT": user.phone,
+        "type": "identity", // Internal use
+        "sig": mockHmac(user.phone + HMAC_SECRET)
+    };
+    return JSON.stringify(payload);
 };
 
 export const parseIdentityToken = (token: string): string | null => {
-    try {
-        const json = JSON.parse(safeDecode(token));
-        if (json.type === 'identity' && json.phone) {
-            return json.phone;
-        }
-        return null;
-    } catch (e) {
-        return null;
+    const json = tryParseJSON(token);
+    if (json && (json.type === 'identity' || json.SĐT) && (json.phone || json.SĐT)) {
+        return json.phone || json.SĐT;
     }
+    return null;
 };
 
 export const changePin = async (phone: string, oldPin: string, newPin: string) => {
@@ -251,20 +249,16 @@ export const createTicket = async (
     };
 
     if (isSupabaseConfigured()) {
-        // Check if user exists FIRST to avoid 409
         const { data: user } = await supabase.from('users').select('id').eq('phone', data.owner_phone).single();
         if (!user) {
-            // Auto-create customer if not exists (should be handled by registerCustomer, but this is a safety net)
              const regResult = await registerCustomer(data.owner_name, data.owner_phone, '1234', performerId);
              if (!regResult.success) { console.error(regResult.message); return null; }
         }
-
         const { error } = await supabase.from('tickets').insert(newTicket);
         if (error) { console.error('Create Ticket Error', error); return null; }
     } else {
         const db = getLocalDB();
         db.tickets.unshift(newTicket);
-        // Auto create user in local
         if (!db.users.find(u => u.phone === newTicket.owner_phone)) {
              db.users.push({
                 id: `u_${Date.now()}`, name: newTicket.owner_name, phone: newTicket.owner_phone, 
@@ -273,7 +267,6 @@ export const createTicket = async (
         }
         saveLocalDB(db);
     }
-    
     return newTicket;
 };
 
@@ -298,41 +291,51 @@ export const getAllTickets = async (): Promise<Ticket[]> => {
 export const generateTicketToken = async (ticketId: string) => {
     const timestamp = Date.now();
     const signature = mockHmac(`${ticketId}|${timestamp}|${HMAC_SECRET}`);
-    const payload = JSON.stringify({ id: ticketId, ts: timestamp, sig: signature, type: 'dynamic' });
-    return safeEncode(payload);
+    // JSON thuần
+    const payload = { id: ticketId, ts: timestamp, sig: signature, type: 'dynamic' };
+    return JSON.stringify(payload);
 };
 
 export const generateDayPassToken = async (ticketId: string) => {
     const today = new Date().toISOString().split('T')[0];
     const signature = mockHmac(`${ticketId}|${today}|daypass|${HMAC_SECRET}`);
-    const payload = JSON.stringify({ id: ticketId, date: today, sig: signature, type: 'daypass' });
-    return safeEncode(payload);
+    // JSON thuần có thông tin dễ đọc
+    const payload = { 
+        "Loại": "QR Trong Ngày",
+        "Ngày": today,
+        "id": ticketId, 
+        "type": "daypass",
+        "sig": signature
+    };
+    return JSON.stringify(payload);
 };
 
 export const generateStaticTicketQR = async (ticket: Ticket) => {
     const signature = mockHmac(`${ticket.ticket_id}|${ticket.owner_phone}|static_card|${HMAC_SECRET}`);
-    const payload = JSON.stringify({
-        id: ticket.ticket_id,
-        name: ticket.owner_name,
-        phone: ticket.owner_phone,
-        type: ticket.type_label,
-        rem: ticket.remaining_uses,
-        card_type: 'static_card',
-        sig: signature
-    });
-    return safeEncode(payload);
+    // JSON thuần có tiếng Việt để Zalo đọc được
+    const payload = {
+        "Vé": ticket.type_label,
+        "Khách": ticket.owner_name,
+        "SĐT": ticket.owner_phone,
+        "Hạn": new Date(ticket.expires_at).toLocaleDateString('vi-VN'),
+        "id": ticket.ticket_id,
+        "type": "static_card",
+        "sig": signature
+    };
+    return JSON.stringify(payload);
 };
 
 // 3. CHECK-IN & PREVIEW
 export const previewTicketToken = async (identifier: string): Promise<{ success: boolean; ticket?: Ticket; message: string }> => {
     let ticketId = identifier;
     
-    try {
-        const decoded = JSON.parse(safeDecode(identifier));
-        if (decoded.id) ticketId = decoded.id;
-        else return { success: false, message: 'QR không hợp lệ' };
-    } catch (e) {
-        // Fallback for raw ID if any
+    // Try parsing JSON first
+    const json = tryParseJSON(identifier);
+    if (json && json.id) {
+        ticketId = json.id;
+    } else {
+        // Fallback: if simple string or fail
+        if (identifier.startsWith('{')) return { success: false, message: 'QR sai định dạng' };
     }
 
     let dbTicket: Ticket | undefined;
@@ -356,16 +359,10 @@ export const performCheckIn = async (
 ): Promise<{ success: boolean; message: string; remaining?: number; requirePin?: boolean }> => {
   
   let ticketId = identifier;
-  let dbTicket: Ticket | undefined;
+  const json = tryParseJSON(identifier);
+  if (json && json.id) ticketId = json.id;
 
-  if (method === 'QR_RIENG') {
-      try {
-          const decoded = JSON.parse(safeDecode(identifier));
-          ticketId = decoded.id;
-      } catch (e) {
-          return { success: false, message: 'Mã QR không hợp lệ' };
-      }
-  }
+  let dbTicket: Ticket | undefined;
 
   if (isSupabaseConfigured()) {
       const { data } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
