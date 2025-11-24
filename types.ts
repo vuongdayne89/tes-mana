@@ -1,7 +1,7 @@
 
 export enum UserRole {
-  SUPER_ADMIN = 'SUPER_ADMIN', // New Role
-  OWNER = 'OWNER',
+  PLATFORM_ADMIN = 'PLATFORM_ADMIN', // Owner of ONIN
+  OWNER = 'OWNER', // Brand Owner
   STAFF = 'STAFF',
   CUSTOMER = 'CUSTOMER'
 }
@@ -20,9 +20,18 @@ export enum TicketStatus {
   LOCKED = 'locked'
 }
 
+export interface Package {
+  id: string;
+  name: string;
+  max_branches: number;
+  price: number;
+  description: string;
+}
+
 export interface Tenant {
   id: string;
-  name: string; // Brand Name (e.g., "Yoga An An")
+  name: string; // Brand Name
+  package_id?: string;
   status: 'active' | 'locked';
   subscription_end: string;
   created_at: string;
@@ -30,8 +39,8 @@ export interface Tenant {
 
 export interface Ticket {
   ticket_id: string;
-  tenant_id: string; // Linked to Tenant
-  shop_id: string; // Legacy support (alias for tenant in some contexts or sub-shop)
+  tenant_id: string;
+  shop_id: string;
   branch_id: string;
   owner_phone: string;
   owner_name: string;
@@ -47,7 +56,7 @@ export interface Ticket {
 
 export interface User {
   id: string;
-  tenant_id?: string; // Null for Super Admin
+  tenant_id?: string; 
   name: string;
   phone: string;
   role: UserRole;
@@ -76,7 +85,7 @@ export interface CheckInLog {
 export interface AuditLog {
   id: string;
   tenant_id: string;
-  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN' | 'CREATE_CUSTOMER' | 'UPDATE_BRAND';
+  action: 'CREATE_TICKET' | 'LOCK_TICKET' | 'RESET_PIN' | 'EXPORT_DATA' | 'MANUAL_CHECKIN' | 'CREATE_CUSTOMER' | 'UPDATE_BRAND' | 'MANAGE_BRANCH';
   performer_id: string;
   target_id?: string;
   details: string;

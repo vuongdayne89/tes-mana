@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Switch, Route, Redirect } from 'react-router-dom';
 import Landing from './pages/Landing';
 import PublicCheckIn from './pages/PublicCheckIn';
 import CustomerDashboard from './pages/CustomerDashboard';
@@ -12,18 +12,20 @@ import Login from './pages/Login';
 const App: React.FC = () => {
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/checkin" element={<PublicCheckIn />} />
-        <Route path="/login" element={<Login />} />
+      <Switch>
+        <Route exact path="/" component={Landing} />
+        <Route path="/checkin" component={PublicCheckIn} />
+        <Route path="/login" component={Login} />
         
-        <Route path="/customer/*" element={<CustomerDashboard />} />
-        <Route path="/staff/*" element={<StaffDashboard />} />
-        <Route path="/owner/*" element={<OwnerDashboard />} />
-        <Route path="/super-admin/*" element={<SuperAdminDashboard />} />
+        <Route path="/customer" component={CustomerDashboard} />
+        <Route path="/staff" component={StaffDashboard} />
+        <Route path="/owner" component={OwnerDashboard} />
+        <Route path="/super-admin" component={SuperAdminDashboard} />
         
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        <Route path="*">
+            <Redirect to="/" />
+        </Route>
+      </Switch>
     </Router>
   );
 };

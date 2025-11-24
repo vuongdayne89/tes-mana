@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { getTicketsByPhone, performCheckIn, login, parseIdentityToken } from '../services/mockDb';
 import { Ticket } from '../types';
 import TicketCard from '../components/TicketCard';
@@ -8,7 +8,8 @@ import { AlertCircle, CheckCircle, Smartphone, KeyRound, QrCode } from 'lucide-r
 import { Scanner } from '@yudiel/react-qr-scanner';
 
 const PublicCheckIn: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
   const shopId = searchParams.get('shop_id') || 'anan1';
   
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);

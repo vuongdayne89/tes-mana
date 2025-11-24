@@ -1,8 +1,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { UserRole } from '../types';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, PieChart, List, User, QrCode, Building, Settings } from 'lucide-react';
+import { useHistory, useLocation } from 'react-router-dom';
+import { LogOut, PieChart, List, User, QrCode, Building, Settings, MapPin } from 'lucide-react';
 import { getSession } from '../services/mockDb';
 
 interface LayoutProps {
@@ -12,7 +12,7 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
-  const navigate = useNavigate();
+  const history = useHistory();
   const location = useLocation();
   const [brandName, setBrandName] = useState('ONIN Platform');
 
@@ -21,13 +21,13 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
       if (session?.tenantName) {
           setBrandName(session.tenantName);
       }
-      if (role === UserRole.SUPER_ADMIN) {
-          setBrandName('ONIN Super Admin');
+      if (role === UserRole.PLATFORM_ADMIN) {
+          setBrandName('ONIN Platform Owner');
       }
   }, [role]);
 
   const handleLogout = () => {
-    navigate('/');
+    history.push('/');
   };
 
   const isActive = (path: string) => location.pathname === path;
@@ -39,7 +39,7 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div>
               <h1 className="font-bold text-lg leading-tight">{brandName}</h1>
-              {role !== UserRole.SUPER_ADMIN && <p className="text-xs text-brand-100 opacity-80">{title}</p>}
+              {role !== UserRole.PLATFORM_ADMIN && <p className="text-xs text-brand-100 opacity-80">{title}</p>}
           </div>
           {role && (
             <button onClick={handleLogout} className="p-2 hover:bg-brand-700 rounded-full" title="Đăng xuất">
@@ -62,29 +62,30 @@ const Layout: React.FC<LayoutProps> = ({ children, role, title }) => {
             {role === UserRole.CUSTOMER && (
               <NavItem 
                 icon={<User size={24} />} label="Vé của tôi" 
-                active={isActive('/customer')} onClick={() => navigate('/customer')} 
+                active={isActive('/customer')} onClick={() => history.push('/customer')} 
               />
             )}
 
             {role === UserRole.STAFF && (
               <>
-                <NavItem icon={<QrCode size={24} />} label="Quét QR" active={isActive('/staff')} onClick={() => navigate('/staff')} />
-                <NavItem icon={<List size={24} />} label="Hoạt động" active={isActive('/staff/activity')} onClick={() => navigate('/staff/activity')} />
+                <NavItem icon={<QrCode size={24} />} label="Quét QR" active={isActive('/staff')} onClick={() => history.push('/staff')} />
+                <NavItem icon={<List size={24} />} label="Hoạt động" active={isActive('/staff/activity')} onClick={() => history.push('/staff/activity')} />
               </>
             )}
 
             {role === UserRole.OWNER && (
               <>
-                <NavItem icon={<PieChart size={24} />} label="Tổng quan" active={isActive('/owner')} onClick={() => navigate('/owner')} />
-                <NavItem icon={<List size={24} />} label="Vé" active={isActive('/owner/tickets')} onClick={() => navigate('/owner/tickets')} />
-                <NavItem icon={<User size={24} />} label="Logs" active={isActive('/owner/logs')} onClick={() => navigate('/owner/logs')} />
+                <NavItem icon={<PieChart size={24} />} label="Tổng quan" active={isActive('/owner')} onClick={() => history.push('/owner')} />
+                <NavItem icon={<List size={24} />} label="Vé" active={isActive('/owner/tickets')} onClick={() => history.push('/owner/tickets')} />
+                <NavItem icon={<MapPin size={24} />} label="Chi nhánh" active={isActive('/owner/branches')} onClick={() => history.push('/owner/branches')} />
+                <NavItem icon={<User size={24} />} label="Logs" active={isActive('/owner/logs')} onClick={() => history.push('/owner/logs')} />
               </>
             )}
 
-             {role === UserRole.SUPER_ADMIN && (
+             {role === UserRole.PLATFORM_ADMIN && (
               <>
-                <NavItem icon={<Building size={24} />} label="Thương hiệu" active={isActive('/super-admin')} onClick={() => navigate('/super-admin')} />
-                <NavItem icon={<Settings size={24} />} label="Hệ thống" active={isActive('/super-admin/settings')} onClick={() => navigate('/super-admin/settings')} />
+                <NavItem icon={<Building size={24} />} label="Thương hiệu" active={isActive('/super-admin')} onClick={() => history.push('/super-admin')} />
+                <NavItem icon={<Settings size={24} />} label="Gói DV" active={isActive('/super-admin/settings')} onClick={() => history.push('/super-admin/settings')} />
               </>
             )}
           </div>

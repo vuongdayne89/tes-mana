@@ -1,14 +1,17 @@
+
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, Ticket, AuditLog, TicketType, User, CustomerDetail } from '../types';
+import { UserRole, Ticket, AuditLog, TicketType, User, CustomerDetail, Branch } from '../types';
 import { 
   getAllTickets, getDashboardStats, createTicket, toggleTicketLock, 
-  resetPin, getAuditLogs, getStaffUsers, addStaff, removeStaff, updateTicket, generateDayPassToken, generateStaticTicketQR, getCustomerFullDetails, deleteTicket, updateBrandName, getSession
+  resetPin, getAuditLogs, getStaffUsers, addStaff, removeStaff, updateTicket, 
+  generateDayPassToken, generateStaticTicketQR, getCustomerFullDetails, deleteTicket, 
+  updateBrandName, getSession, getBranches, createBranch, deleteBranch
 } from '../services/mockDb';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { 
   Users, CreditCard, AlertTriangle, Activity, Lock, Unlock, 
-  FileDown, Plus, Search, Trash2, Edit, QrCode, X, Printer, Settings
+  FileDown, Plus, Search, Trash2, Edit, QrCode, X, Printer, Settings, MapPin
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
@@ -25,17 +28,20 @@ const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string |
 );
 
 const OwnerDashboard: React.FC = () => {
-  const [activeView, setActiveView] = useState<'overview' | 'tickets' | 'staff' | 'logs' | 'config'>('overview');
+  const [activeView, setActiveView] = useState<'overview' | 'tickets' | 'staff' | 'branches' | 'logs' | 'config'>('overview');
   const [stats, setStats] = useState<any>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [staff, setStaff] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [showBranchModal, setShowBranchModal] = useState(false);
   const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket, title: string, subtitle?: string} | null>(null);
   
+  // Forms
   const [newTicketPhone, setNewTicketPhone] = useState('');
   const [newTicketName, setNewTicketName] = useState('');
   const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
@@ -43,12 +49,13 @@ const OwnerDashboard: React.FC = () => {
   
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
-  const [newStaffBranch, setNewStaffBranch] = useState('anan1');
+  const [newStaffBranch, setNewStaffBranch] = useState('');
+  
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchAddr, setNewBranchAddr] = useState('');
   
   const [searchPhone, setSearchPhone] = useState('');
   const [viewingCustomer, setViewingCustomer] = useState<CustomerDetail | null>(null);
-
-  // Brand Config
   const [brandName, setBrandName] = useState('');
 
   const loadData = async () => {
@@ -56,42 +63,46 @@ const OwnerDashboard: React.FC = () => {
     getAllTickets().then(setTickets);
     getAuditLogs().then(setAuditLogs);
     getStaffUsers().then(setStaff);
+    getBranches().then(res => {
+        setBranches(res);
+        if(res.length > 0 && !newStaffBranch) setNewStaffBranch(res[0].id);
+    });
     const s = getSession();
     if(s && s.tenantName) setBrandName(s.tenantName);
   };
 
-  useEffect(() => {
-    loadData();
-  }, [activeView]);
+  useEffect(() => { loadData(); }, [activeView]);
 
-  const handleUpdateBrand = async () => {
-      await updateBrandName(brandName);
-      alert('Cập nhật tên thương hiệu thành công!');
-      window.location.reload();
+  const handleCreateBranch = async (e: React.FormEvent) => {
+      e.preventDefault();
+      await createBranch(newBranchName, newBranchAddr);
+      setShowBranchModal(false); setNewBranchName(''); setNewBranchAddr(''); loadData();
   };
 
-  // ... (Keep existing handlers: handleCreateTicket, handleEditTicketClick, etc. same as before)
+  const handleDeleteBranch = async (id: string) => {
+      if(confirm('Xóa chi nhánh này?')) {
+          await deleteBranch(id);
+          loadData();
+      }
+  };
+
+  // ... (Other handlers same as previous)
+  const handleUpdateBrand = async () => { await updateBrandName(brandName); alert('Cập nhật thành công!'); window.location.reload(); };
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newTicket = await createTicket({ 
-        owner_phone: newTicketPhone, owner_name: newTicketName, type: newTicketType,
-    }, 'owner1');
-    setShowCreateModal(false);
-    setNewTicketPhone(''); setNewTicketName('');
+    const newTicket = await createTicket({ owner_phone: newTicketPhone, owner_name: newTicketName, type: newTicketType }, 'owner1');
+    setShowCreateModal(false); setNewTicketPhone(''); setNewTicketName('');
     if (newTicket) {
         const token = await generateStaticTicketQR(newTicket);
-        setQrModalData({ token, ticket: newTicket, title: "THẺ THÀNH VIÊN (IN)", subtitle: "Mã QR cố định cho khách" });
+        setQrModalData({ token, ticket: newTicket, title: "THẺ THÀNH VIÊN", subtitle: "Mã QR cố định" });
         loadData();
     }
   };
-  
   const handleSearchCustomer = async () => {
       if(!searchPhone) return;
       const details = await getCustomerFullDetails(searchPhone);
-      if(details) setViewingCustomer(details);
-      else alert('Không tìm thấy khách hàng');
+      if(details) setViewingCustomer(details); else alert('Không tìm thấy khách hàng');
   };
-
   const handleEditTicketClick = (ticket: Ticket) => { setEditingTicket(ticket); setShowEditModal(true); };
   const handleUpdateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,7 +128,7 @@ const OwnerDashboard: React.FC = () => {
   return (
     <Layout role={UserRole.OWNER} title="Quản Lý Thương Hiệu">
        <div className="flex space-x-4 mb-6 border-b border-gray-200 pb-1 overflow-x-auto">
-        {['overview', 'tickets', 'staff', 'logs', 'config'].map(v => (
+        {['overview', 'tickets', 'branches', 'staff', 'logs', 'config'].map(v => (
              <button key={v} onClick={() => setActiveView(v as any)} className={`px-4 py-2 font-medium text-sm border-b-2 whitespace-nowrap uppercase ${activeView === v ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'}`}>{v}</button>
         ))}
       </div>
@@ -170,6 +181,82 @@ const OwnerDashboard: React.FC = () => {
         </div>
       )}
 
+      {activeView === 'branches' && (
+          <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-gray-700">Chi nhánh ({branches.length})</h3>
+                  <button onClick={() => setShowBranchModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Thêm Chi Nhánh</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {branches.map(b => (
+                      <div key={b.id} className="bg-white p-4 rounded-xl border shadow-sm flex justify-between items-center">
+                          <div className="flex items-center">
+                              <div className="bg-brand-100 p-3 rounded-full text-brand-600 mr-3"><MapPin size={20}/></div>
+                              <div>
+                                  <h4 className="font-bold">{b.name}</h4>
+                                  <p className="text-sm text-gray-500">{b.address}</p>
+                              </div>
+                          </div>
+                          <button onClick={() => handleDeleteBranch(b.id)} className="text-red-500 hover:bg-red-50 p-2 rounded"><Trash2 size={18}/></button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
+      {activeView === 'staff' && (
+           <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-gray-700">Nhân viên ({staff.length})</h3>
+                  <button onClick={() => setShowAddStaffModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Thêm</button>
+              </div>
+               <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <table className="w-full text-sm text-left">
+                      <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-xs"><tr><th className="p-4">Tên</th><th className="p-4">SĐT</th><th className="p-4">Chi nhánh</th><th className="p-4 text-right">Xóa</th></tr></thead>
+                      <tbody>
+                          {staff.map(s => (
+                              <tr key={s.id} className="border-b hover:bg-gray-50">
+                                  <td className="p-4 font-bold">{s.name}</td><td className="p-4">{s.phone}</td>
+                                  <td className="p-4">{branches.find(b=>b.id===s.branch_id)?.name || s.branch_id}</td>
+                                  <td className="p-4 text-right"><button onClick={() => handleRemoveStaff(s.id)} className="text-red-500"><Trash2 size={16} /></button></td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+           </div>
+      )}
+
+      {/* REUSED MODALS */}
+      {showBranchModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                  <h3 className="font-bold text-lg mb-4">Thêm Chi Nhánh Mới</h3>
+                  <form onSubmit={handleCreateBranch} className="space-y-4">
+                      <input className="w-full p-2 border rounded" placeholder="Tên chi nhánh" value={newBranchName} onChange={e=>setNewBranchName(e.target.value)} required />
+                      <input className="w-full p-2 border rounded" placeholder="Địa chỉ" value={newBranchAddr} onChange={e=>setNewBranchAddr(e.target.value)} required />
+                      <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={() => setShowBranchModal(false)} className="px-4 py-2 bg-gray-200 rounded">Hủy</button><button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded font-bold">Tạo</button></div>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {showAddStaffModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                  <h3 className="font-bold text-lg mb-4">Thêm Nhân Viên</h3>
+                  <form onSubmit={handleAddStaff} className="space-y-4">
+                      <input className="w-full p-2 border rounded" placeholder="Họ tên" value={newStaffName} onChange={e=>setNewStaffName(e.target.value)} required />
+                      <input className="w-full p-2 border rounded" placeholder="SĐT" value={newStaffPhone} onChange={e=>setNewStaffPhone(e.target.value)} required />
+                      <select className="w-full p-2 border rounded" value={newStaffBranch} onChange={e=>setNewStaffBranch(e.target.value)}>
+                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                      <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={() => setShowAddStaffModal(false)} className="px-4 py-2 bg-gray-200 rounded">Hủy</button><button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded font-bold">Thêm</button></div>
+                  </form>
+              </div>
+          </div>
+      )}
+
       {activeView === 'config' && (
           <div className="max-w-lg bg-white p-8 rounded-xl border shadow-sm">
               <h3 className="font-bold text-lg mb-6 flex items-center"><Settings className="mr-2" /> Cấu Hình Thương Hiệu</h3>
@@ -177,22 +264,19 @@ const OwnerDashboard: React.FC = () => {
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Tên hiển thị (Dashboard)</label>
                       <input type="text" className="w-full p-3 border rounded-lg" value={brandName} onChange={e => setBrandName(e.target.value)} />
-                      <p className="text-xs text-gray-500 mt-1">Tên này sẽ hiển thị trên thanh tiêu đề của tất cả nhân viên.</p>
                   </div>
                   <button onClick={handleUpdateBrand} className="w-full bg-brand-600 text-white py-3 rounded-lg font-bold hover:bg-brand-700">Lưu Thay Đổi</button>
               </div>
           </div>
       )}
 
+      {/* Tickets & QR Modals are kept similar but hidden for brevity in XML unless changed */}
       {activeView === 'tickets' && (
           <div className="space-y-4">
                <div className="flex justify-between items-center flex-wrap gap-2">
                   <div className="flex items-center space-x-2">
                       <h3 className="font-bold text-gray-700">Danh sách vé</h3>
-                      <div className="relative">
-                          <input type="text" placeholder="Tìm SĐT..." className="pl-8 pr-2 py-1 border rounded text-sm" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} />
-                          <Search size={14} className="absolute left-2 top-2 text-gray-400" />
-                      </div>
+                      <div className="relative"><input type="text" placeholder="Tìm SĐT..." className="pl-8 pr-2 py-1 border rounded text-sm" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} /><Search size={14} className="absolute left-2 top-2 text-gray-400" /></div>
                       <button onClick={handleSearchCustomer} className="text-sm bg-gray-100 px-3 py-1 rounded hover:bg-gray-200">Tìm</button>
                   </div>
                   <button onClick={() => setShowCreateModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Tạo Vé Mới</button>
@@ -222,30 +306,6 @@ const OwnerDashboard: React.FC = () => {
           </div>
       )}
 
-      {/* Reuse other views (Staff, Logs) from previous version... (Simplified for brevity in this block but implied presence) */}
-      {activeView === 'staff' && (
-           <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-gray-700">Nhân viên ({staff.length})</h3>
-                  <button onClick={() => setShowAddStaffModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Thêm</button>
-              </div>
-               <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-xs"><tr><th className="p-4">Tên</th><th className="p-4">SĐT</th><th className="p-4 text-right">Xóa</th></tr></thead>
-                      <tbody>
-                          {staff.map(s => (
-                              <tr key={s.id} className="border-b hover:bg-gray-50">
-                                  <td className="p-4 font-bold">{s.name}</td><td className="p-4">{s.phone}</td>
-                                  <td className="p-4 text-right"><button onClick={() => handleRemoveStaff(s.id)} className="text-red-500"><Trash2 size={16} /></button></td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-           </div>
-      )}
-
-      {/* Modals (Create Ticket, Add Staff, Edit Ticket, QR) - Keeping logic same as before */}
       {showCreateModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -275,5 +335,4 @@ const OwnerDashboard: React.FC = () => {
     </Layout>
   );
 };
-
 export default OwnerDashboard;

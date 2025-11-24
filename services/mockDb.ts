@@ -1,10 +1,10 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { Ticket, User, CheckInLog, Branch, UserRole, TicketType, TicketStatus, AuditLog, CustomerDetail, Tenant } from '../types';
+import { Ticket, User, CheckInLog, Branch, UserRole, TicketType, TicketStatus, AuditLog, CustomerDetail, Tenant, Package } from '../types';
 
 // --- Constants ---
 const HMAC_SECRET = 'winson-secure-key-2024';
-const STORAGE_KEY = 'onin_db_v1'; 
+const STORAGE_KEY = 'onin_db_v3'; // Bump version
 const SESSION_KEY = 'onin_session_user';
 
 // --- UTILS ---
@@ -29,8 +29,9 @@ const mockHmac = (text: string): string => {
     return Math.abs(hash).toString(16);
 };
 
-// --- LOCAL STORAGE FALLBACK SYSTEM (Updated for Multi-tenant) ---
+// --- LOCAL STORAGE FALLBACK ---
 interface LocalDB {
+    packages: Package[];
     tenants: Tenant[];
     users: User[];
     tickets: Ticket[];
@@ -40,22 +41,22 @@ interface LocalDB {
 }
 
 const SEED_DB: LocalDB = {
+    packages: [
+        { id: 'pkg_basic', name: 'Gói Cơ Bản', max_branches: 2, price: 1000000, description: 'Phù hợp phòng tập nhỏ' },
+        { id: 'pkg_pro', name: 'Gói Chuyên Nghiệp', max_branches: 10, price: 5000000, description: 'Chuỗi phòng tập' }
+    ],
     tenants: [
-        { id: 'anan', name: 'Yoga An An', status: 'active', subscription_end: '2030-01-01T00:00:00Z', created_at: new Date().toISOString() }
+        { id: 'anan', name: 'Yoga An An', status: 'active', subscription_end: '2030-01-01T00:00:00Z', created_at: new Date().toISOString(), package_id: 'pkg_basic' }
     ],
     branches: [
         { id: 'anan1', tenant_id: 'anan', name: 'Yoga An An - Lê Lợi', address: '123 Lê Lợi, Q1' },
-        { id: 'anan2', tenant_id: 'anan', name: 'Yoga An An - Nguyễn Huệ', address: '45 Nguyễn Huệ, Q1' },
     ],
     users: [
-        { id: 'superadmin', name: 'System Admin', phone: 'admin', role: UserRole.SUPER_ADMIN, password: 'root123' },
+        { id: 'admin', name: 'ONIN Admin', phone: 'admin', role: UserRole.PLATFORM_ADMIN, password: 'root123' },
         { id: 'owner1', tenant_id: 'anan', name: 'Nguyễn Văn Chủ', phone: '0909000001', role: UserRole.OWNER, password: 'admin123' },
         { id: 'staff1', tenant_id: 'anan', name: 'Lê Văn Quản', phone: '0909000002', role: UserRole.STAFF, password: 'staff123', branch_id: 'anan1' },
-        { id: 'cust1', tenant_id: 'anan', name: 'Chị Lan', phone: '0912345678', role: UserRole.CUSTOMER, pin_hash: '1234', identity_token: 'ID_0912345678' }
     ],
-    tickets: [
-        { ticket_id: 'T001', tenant_id: 'anan', shop_id: 'anan', branch_id: 'anan1', owner_phone: '0912345678', owner_name: 'Chị Lan', type: TicketType.SESSION_20, type_label: 'Gói 20 Buổi', total_uses: 20, remaining_uses: 15, expires_at: '2024-12-31T00:00:00Z', status: TicketStatus.ACTIVE, require_pin: true, created_at: '2024-01-01T00:00:00Z' }
-    ],
+    tickets: [],
     checkin_logs: [],
     audit_logs: []
 };
@@ -89,8 +90,27 @@ export const clearSession = () => {
 };
 
 export const getCurrentUser = () => getSession();
+const getTenantId = () => getSession()?.tenant_id;
 
-// --- SUPER ADMIN SERVICES ---
+// --- PLATFORM ADMIN SERVICES (Level 1) ---
+
+export const getPackages = async (): Promise<Package[]> => {
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase.from('packages').select('*');
+        return (data as Package[]) || [];
+    }
+    return getLocalDB().packages;
+};
+
+export const createPackage = async (pkg: Package) => {
+    if (isSupabaseConfigured()) {
+        await supabase.from('packages').insert(pkg);
+    } else {
+        const db = getLocalDB();
+        db.packages.push(pkg);
+        saveLocalDB(db);
+    }
+};
 
 export const getAllTenants = async (): Promise<Tenant[]> => {
     if (isSupabaseConfigured()) {
@@ -100,10 +120,10 @@ export const getAllTenants = async (): Promise<Tenant[]> => {
     return getLocalDB().tenants;
 };
 
-export const createTenant = async (name: string, ownerPhone: string, ownerPassword: string) => {
+export const createTenant = async (name: string, ownerPhone: string, ownerPassword: string, packageId: string) => {
     const tenantId = `t_${Date.now()}`;
     const newTenant: Tenant = {
-        id: tenantId, name, status: 'active',
+        id: tenantId, name, status: 'active', package_id: packageId,
         subscription_end: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
         created_at: new Date().toISOString()
     };
@@ -113,16 +133,22 @@ export const createTenant = async (name: string, ownerPhone: string, ownerPasswo
         name: 'Chủ sở hữu', phone: ownerPhone, role: UserRole.OWNER, password: ownerPassword
     };
 
+    // Create default branch
+    const defaultBranch: Branch = {
+        id: `${tenantId}_b1`, tenant_id: tenantId, name: 'Chi nhánh 1', address: 'Địa chỉ mặc định'
+    };
+
     if (isSupabaseConfigured()) {
         const { error: tErr } = await supabase.from('tenants').insert(newTenant);
         if (tErr) return { success: false, message: tErr.message };
         
-        const { error: uErr } = await supabase.from('users').insert(newOwner);
-        if (uErr) return { success: false, message: uErr.message };
+        await supabase.from('users').insert(newOwner);
+        await supabase.from('branches').insert(defaultBranch);
     } else {
         const db = getLocalDB();
         db.tenants.push(newTenant);
         db.users.push(newOwner);
+        db.branches.push(defaultBranch);
         saveLocalDB(db);
     }
     return { success: true };
@@ -138,9 +164,45 @@ export const updateTenantStatus = async (id: string, status: 'active' | 'locked'
     }
 };
 
+// --- BRAND OWNER SERVICES (Level 2) ---
+
+export const getBranches = async (): Promise<Branch[]> => {
+    const tid = getTenantId();
+    if (!tid) return [];
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase.from('branches').select('*').eq('tenant_id', tid);
+        return (data as Branch[]) || [];
+    }
+    return getLocalDB().branches.filter(b => b.tenant_id === tid);
+};
+
+export const createBranch = async (name: string, address: string) => {
+    const tid = getTenantId();
+    if (!tid) return;
+    const newBranch: Branch = {
+        id: `${tid}_b${Date.now()}`, tenant_id: tid, name, address
+    };
+    if (isSupabaseConfigured()) {
+        await supabase.from('branches').insert(newBranch);
+    } else {
+        const db = getLocalDB();
+        db.branches.push(newBranch);
+        saveLocalDB(db);
+    }
+};
+
+export const deleteBranch = async (id: string) => {
+     if (isSupabaseConfigured()) {
+        await supabase.from('branches').delete().eq('id', id);
+    } else {
+        const db = getLocalDB();
+        db.branches = db.branches.filter(b => b.id !== id);
+        saveLocalDB(db);
+    }
+}
+
 // --- COMMON SERVICES ---
 
-// 1. AUTH
 export const login = async (phone: string, secret: string, requiredRole?: UserRole): Promise<{ user: User | null; error?: string; tenantName?: string }> => {
     let user: User | undefined;
     let tenantName = 'ONIN Platform';
@@ -153,7 +215,7 @@ export const login = async (phone: string, secret: string, requiredRole?: UserRo
         if (user.tenant_id) {
             const { data: t } = await supabase.from('tenants').select('*').eq('id', user.tenant_id).single();
             if (t) {
-                if (t.status === 'locked') return { user: null, error: 'Hệ thống đang bị khóa. Vui lòng liên hệ Admin.' };
+                if (t.status === 'locked') return { user: null, error: 'Thương hiệu đang bị khóa.' };
                 tenantName = t.name;
             }
         }
@@ -165,14 +227,18 @@ export const login = async (phone: string, secret: string, requiredRole?: UserRo
         if (user.tenant_id) {
              const t = db.tenants.find(x => x.id === user.tenant_id);
              if (t) {
-                 if (t.status === 'locked') return { user: null, error: 'Hệ thống bị khóa.' };
+                 if (t.status === 'locked') return { user: null, error: 'Thương hiệu bị khóa.' };
                  tenantName = t.name;
              }
         }
     }
 
-    if (requiredRole && user.role !== requiredRole && user.role !== UserRole.SUPER_ADMIN) {
-        return { user: null, error: `Sai quyền truy cập` };
+    // Role check logic
+    if (requiredRole && user.role !== requiredRole) {
+         // Allow Platform Admin to access generic login if needed, but usually strict
+         if (user.role !== UserRole.PLATFORM_ADMIN) {
+             return { user: null, error: `Sai quyền truy cập` };
+         }
     }
 
     // Auth Check
@@ -183,13 +249,6 @@ export const login = async (phone: string, secret: string, requiredRole?: UserRo
     return { user, tenantName };
 };
 
-// Helper to enforce tenant isolation
-const getTenantId = () => {
-    const u = getSession();
-    return u?.tenant_id;
-};
-
-// 2. TENANT SPECIFIC ACTIONS
 
 export const updateBrandName = async (newName: string) => {
     const tid = getTenantId();
@@ -202,7 +261,6 @@ export const updateBrandName = async (newName: string) => {
         const t = db.tenants.find(x => x.id === tid);
         if (t) { t.name = newName; saveLocalDB(db); }
     }
-    // Update session to reflect name change
     const u = getSession();
     if (u) saveSession(u, newName);
 };
@@ -294,7 +352,7 @@ export const createTicket = async (
         ticket_id: `T${Date.now().toString().slice(-6)}`,
         tenant_id: tid,
         shop_id: tid, 
-        branch_id: 'anan1', // Default for now, can be dynamic later
+        branch_id: 'anan1', // Should be dynamic, but keeping simple for now
         owner_phone: data.owner_phone, owner_name: data.owner_name,
         type: data.type,
         type_label: data.type_label || data.type.toUpperCase(),
@@ -304,7 +362,6 @@ export const createTicket = async (
     };
 
     if (isSupabaseConfigured()) {
-        // Auto create customer check scoped by tenant handled by registerCustomer
         const { data: user } = await supabase.from('users').select('id').eq('phone', data.owner_phone).eq('tenant_id', tid).single();
         if (!user) {
              const regResult = await registerCustomer(data.owner_name, data.owner_phone, '1234', performerId);
@@ -334,13 +391,11 @@ export const deleteTicket = async (ticketId: string) => {
 export const getAllTickets = async (): Promise<Ticket[]> => {
     const tid = getTenantId();
     if (!tid) return [];
-
     if (isSupabaseConfigured()) {
         const { data } = await supabase.from('tickets').select('*').eq('tenant_id', tid);
         return (data as Ticket[]) || [];
-    } else {
-        return getLocalDB().tickets.filter(t => t.tenant_id === tid);
     }
+    return getLocalDB().tickets.filter(t => t.tenant_id === tid);
 };
 
 export const getTicketsByPhone = async (phone: string): Promise<Ticket[]> => {
@@ -354,12 +409,8 @@ export const getTicketsByPhone = async (phone: string): Promise<Ticket[]> => {
     }
 };
 
-// TOKEN & QR Functions (Same logic, just scope context if needed)
 export const generateIdentityToken = (user: User) => {
-    const payload = {
-        "Thẻ": "Thành Viên", "Tên": user.name, "SĐT": user.phone,
-        "type": "identity", "sig": mockHmac(user.phone + HMAC_SECRET)
-    };
+    const payload = { "Thẻ": "Thành Viên", "Tên": user.name, "SĐT": user.phone, "type": "identity", "sig": mockHmac(user.phone + HMAC_SECRET) };
     return JSON.stringify(payload);
 };
 
@@ -374,7 +425,6 @@ export const parseIdentityToken = (token: string): string | null => {
 export const changePin = async (phone: string, oldPin: string, newPin: string) => {
     const { user } = await login(phone, oldPin, UserRole.CUSTOMER);
     if (!user) return { success: false, message: 'PIN cũ không đúng' };
-
     if (isSupabaseConfigured()) {
         await supabase.from('users').update({ pin_hash: newPin }).eq('phone', phone);
     } else {
@@ -388,8 +438,6 @@ export const changePin = async (phone: string, oldPin: string, newPin: string) =
 export const generateTicketToken = async (ticketId: string) => {
     const timestamp = Date.now();
     const signature = mockHmac(`${ticketId}|${timestamp}|${HMAC_SECRET}`);
-    
-    // Fetch ticket to ensure ownership/tenant
     let ticket: Ticket | undefined;
     if (isSupabaseConfigured()) {
         const { data } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
@@ -397,7 +445,6 @@ export const generateTicketToken = async (ticketId: string) => {
     } else {
         ticket = getLocalDB().tickets.find(t => t.ticket_id === ticketId);
     }
-
     const payload: any = { 
         "Vé": ticket?.type_label || ticket?.type || "Vé Tập",
         "Khách": ticket?.owner_name || "",
@@ -429,43 +476,33 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
     let ticketId = identifier;
     const json = tryParseJSON(identifier);
     if (json && json.id) ticketId = json.id;
-
     let dbTicket: Ticket | undefined;
     if (isSupabaseConfigured()) {
-        // No tenant check here initially to allow scanning across branches if valid, but we can enforce strictly
         const { data, error } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
         if (error) return { success: false, message: `Lỗi DB: ${error.message}` };
         if (data) dbTicket = data as Ticket;
     } else {
         dbTicket = getLocalDB().tickets.find(t => t.ticket_id === ticketId);
     }
-
     if (!dbTicket) return { success: false, message: `Vé không tồn tại (${ticketId})` };
-    
-    // Check Tenant Match
     const session = getSession();
     if (session && session.tenant_id && dbTicket.tenant_id !== session.tenant_id) {
         return { success: false, message: 'Vé này thuộc về hệ thống khác!' };
     }
-
     return { success: true, ticket: dbTicket, message: 'Tìm thấy vé' };
 };
 
 export const performCheckIn = async (
   identifier: string, method: 'QR_CHUNG' | 'QR_RIENG' | 'MANUAL', branchId: string, performedBy?: string, pin?: string 
 ): Promise<{ success: boolean; message: string; remaining?: number; requirePin?: boolean }> => {
-  
   const prev = await previewTicketToken(identifier);
   if (!prev.success || !prev.ticket) return { success: false, message: prev.message };
   const dbTicket = prev.ticket;
-
   if (dbTicket.remaining_uses <= 0) return { success: false, message: 'Vé đã hết lượt sử dụng' };
   if (new Date(dbTicket.expires_at) < new Date()) return { success: false, message: 'Vé đã hết hạn' };
   if (dbTicket.status === TicketStatus.LOCKED) return { success: false, message: 'Vé đang bị khóa' };
-
   if (dbTicket.require_pin && method !== 'MANUAL') {
       if (!pin) return { success: false, message: 'Cần nhập PIN', requirePin: true };
-      
       let validPin = false;
       if (isSupabaseConfigured()) {
           const { data } = await supabase.from('users').select('pin_hash').eq('phone', dbTicket.owner_phone).single();
@@ -476,9 +513,7 @@ export const performCheckIn = async (
       }
       if (!validPin) return { success: false, message: 'Mã PIN sai' };
   }
-
   const newRemaining = dbTicket.remaining_uses - 1;
-  
   if (isSupabaseConfigured()) {
       await supabase.from('tickets').update({ remaining_uses: newRemaining }).eq('ticket_id', dbTicket.ticket_id);
       await supabase.from('checkin_logs').insert({
@@ -500,7 +535,6 @@ export const performCheckIn = async (
   return { success: true, message: 'Check-in Thành Công', remaining: newRemaining };
 };
 
-// 5. ADMIN & STAFF UTILS (Scoped)
 export const updateTicket = async (ticketId: string, data: Partial<Ticket>, ownerId: string) => {
     if (isSupabaseConfigured()) {
         await supabase.from('tickets').update(data).eq('ticket_id', ticketId);
@@ -511,19 +545,13 @@ export const updateTicket = async (ticketId: string, data: Partial<Ticket>, owne
     }
     return true;
 };
-
 export const toggleTicketLock = async (ticketId: string, performerId: string) => {
     const db = getLocalDB();
     const t = db.tickets.find(x => x.ticket_id === ticketId);
     if (t) { t.status = t.status === TicketStatus.LOCKED ? TicketStatus.ACTIVE : TicketStatus.LOCKED; saveLocalDB(db); }
-    if (isSupabaseConfigured()) {
-        // Simple toggle logic would require fetching first in real DB, skipping for brevity
-        await supabase.rpc('toggle_ticket_lock', { t_id: ticketId }); 
-    }
+    if (isSupabaseConfigured()) { await supabase.rpc('toggle_ticket_lock', { t_id: ticketId }); }
 };
-
 export const resetPin = async (phone: string, performerId: string) => { return changePin(phone, 'IGNORE', '1234'); };
-
 export const getStaffUsers = async (): Promise<User[]> => {
     const tid = getTenantId();
     if (!tid) return [];
@@ -533,7 +561,6 @@ export const getStaffUsers = async (): Promise<User[]> => {
     }
     return getLocalDB().users.filter(u => u.role === UserRole.STAFF && u.tenant_id === tid);
 };
-
 export const addStaff = async (staffData: Partial<User>, performerId: string) => {
     const tid = getTenantId();
     const newUser = {
@@ -544,12 +571,10 @@ export const addStaff = async (staffData: Partial<User>, performerId: string) =>
     if (isSupabaseConfigured()) { await supabase.from('users').insert(newUser); }
     else { const db = getLocalDB(); db.users.push(newUser as User); saveLocalDB(db); }
 };
-
 export const removeStaff = async (staffId: string, performerId: string) => {
     if (isSupabaseConfigured()) { await supabase.from('users').delete().eq('id', staffId); }
     else { const db = getLocalDB(); db.users = db.users.filter(u => u.id !== staffId); saveLocalDB(db); }
 };
-
 export const getCheckInLogs = async (): Promise<CheckInLog[]> => {
     const tid = getTenantId();
     if (!tid) return [];
@@ -559,7 +584,6 @@ export const getCheckInLogs = async (): Promise<CheckInLog[]> => {
     }
     return getLocalDB().checkin_logs.filter(l => l.tenant_id === tid);
 };
-
 export const getAuditLogs = async (): Promise<AuditLog[]> => {
     const tid = getTenantId();
     if (!tid) return [];
@@ -569,11 +593,10 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
     }
     return getLocalDB().audit_logs.filter(l => l.tenant_id === tid);
 };
-
 export const getDashboardStats = async () => {
     const tid = getTenantId();
     if (isSupabaseConfigured()) {
-        // Simplified for mock
+        // Mock stats for simplicity
         return { totalCheckins: 100, activeTickets: 50, expiringSoon: 5, todayCheckins: 10 };
     }
     const db = getLocalDB();
@@ -586,5 +609,4 @@ export const getDashboardStats = async () => {
         todayCheckins: myLogs.filter(l => l.timestamp.startsWith(new Date().toISOString().slice(0, 10))).length
     };
 };
-
 export const exportData = async (type: 'logs' | 'tickets', performerId: string) => { return { url: '#' }; };

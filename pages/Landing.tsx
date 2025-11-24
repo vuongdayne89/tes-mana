@@ -1,14 +1,14 @@
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import { UserRole } from '../types';
 import { Users, LayoutDashboard, QrCode, ShieldCheck } from 'lucide-react';
 
 const Landing: React.FC = () => {
-  const navigate = useNavigate();
+  const history = useHistory();
 
   const handleNavigateToLogin = (role: UserRole) => {
-    navigate(`/login?role=${role}`);
+    history.push(`/login?role=${role}`);
   };
 
   return (
@@ -23,7 +23,7 @@ const Landing: React.FC = () => {
 
           <div className="space-y-3">
              <button
-              onClick={() => navigate('/checkin?shop_id=anan1')}
+              onClick={() => history.push('/checkin?shop_id=anan1')}
               className="w-full flex items-center justify-center p-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl transition-colors font-semibold shadow-lg shadow-brand-200"
             >
               <QrCode className="mr-3" />
@@ -54,13 +54,13 @@ const Landing: React.FC = () => {
               <div><div className="font-medium text-gray-900">Chủ thương hiệu</div><div className="text-xs text-gray-500">Quản trị & Báo cáo</div></div>
             </button>
 
-             <button onClick={() => handleNavigateToLogin(UserRole.SUPER_ADMIN)} className="w-full flex items-center justify-center p-2 text-gray-400 text-xs hover:text-gray-600 mt-4">
-              Quản trị hệ thống (Super Admin)
+             <button onClick={() => handleNavigateToLogin(UserRole.PLATFORM_ADMIN)} className="w-full flex items-center justify-center p-2 text-gray-400 text-xs hover:text-gray-600 mt-4">
+              Platform Admin (ONIN)
             </button>
           </div>
         </div>
         <div className="bg-gray-50 p-4 text-center text-xs text-gray-400">
-          Powered by ONIN Platform © 2024
+          Powered by ONIN Platform © 2025
         </div>
       </div>
     </div>
