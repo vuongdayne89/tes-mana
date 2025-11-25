@@ -1,18 +1,19 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, Ticket, CheckInLog, Branch } from '../types';
+import { UserRole, CheckInLog, Branch, User } from '../types';
 import { 
-  getDashboardStats, getHourlyChartData, getCheckInLogs, getBranches, getTicketsByPhone,
-  exportData
+  getDashboardStats, getHourlyChartData, getCheckInLogs, getBranches, 
+  createBranch, deleteBranch, getStaffUsers, addStaff, removeStaff, updateBrandName
 } from '../services/mockDb';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
 } from 'recharts';
 import { 
   Activity, Users, AlertTriangle, XCircle, Download, FileSpreadsheet, Printer,
-  LayoutDashboard, User, Package, QrCode, MapPin, FileText, Settings
+  LayoutDashboard, User as UserIcon, Package, QrCode, MapPin, FileText, Settings, Plus, Trash2, Save
 } from 'lucide-react';
+import QRCode from "react-qr-code";
 
 const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string | number, color: string }> = ({ icon, label, value, color }) => (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between h-full hover:shadow-md transition-shadow">
@@ -20,7 +21,6 @@ const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string |
              <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-${color.replace('bg-', '')}`}>
                 {icon}
             </div>
-             {/* Optional Badge/Trend could go here */}
         </div>
         <div>
             <h3 className="text-3xl font-bold text-gray-900 mb-1">{value}</h3>
@@ -35,26 +35,82 @@ const OwnerDashboard: React.FC = () => {
   const [hourlyData, setHourlyData] = useState<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<CheckInLog[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [staffList, setStaffList] = useState<User[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+
+  // Form States
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchAddr, setNewBranchAddr] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffPass, setNewStaffPass] = useState('staff123');
+  const [newStaffBranch, setNewStaffBranch] = useState('');
+  const [brandNameInput, setBrandNameInput] = useState('');
 
   useEffect(() => {
     loadData();
   }, [selectedBranch]);
 
+  useEffect(() => {
+      if(activeTab === 'staff') loadStaff();
+      if(activeTab === 'settings') {
+          // In real app, fetch current name. Here we just use input
+      }
+  }, [activeTab]);
+
   const loadData = async () => {
     const b = await getBranches();
     setBranches(b);
-    
     const s = await getDashboardStats(selectedBranch || undefined);
     setStats(s);
-    
-    const h = await getHourlyChartData();
+    const h = await getHourlyChartData(selectedBranch || undefined);
     setHourlyData(h);
-
-    // Get logs and we'd ideally join with user/ticket info here or fetch ticket details for each log
-    // For this UI demo, we'll use the log info directly and assume some data
     const logs = await getCheckInLogs(); 
-    setRecentLogs(logs.slice(0, 10)); // Top 10 recent
+    setRecentLogs(logs.slice(0, 10)); 
+  };
+
+  const loadStaff = async () => {
+      const s = await getStaffUsers();
+      setStaffList(s);
+  };
+
+  const handleCreateBranch = async (e: React.FormEvent) => {
+      e.preventDefault();
+      await createBranch(newBranchName, newBranchAddr);
+      setNewBranchName(''); setNewBranchAddr('');
+      loadData();
+      alert('Đã tạo chi nhánh!');
+  };
+
+  const handleDeleteBranch = async (id: string) => {
+      if(confirm('Xóa chi nhánh này?')) {
+          await deleteBranch(id);
+          loadData();
+      }
+  };
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newStaffBranch) return alert('Vui lòng chọn chi nhánh cho nhân viên');
+      await addStaff({ 
+          name: newStaffName, phone: newStaffPhone, password: newStaffPass, branch_id: newStaffBranch 
+      }, 'owner');
+      setNewStaffName(''); setNewStaffPhone(''); 
+      loadStaff();
+      alert('Đã thêm nhân viên!');
+  };
+
+  const handleDeleteStaff = async (id: string) => {
+      if(confirm('Xóa nhân viên này?')) {
+          await removeStaff(id, 'owner');
+          loadStaff();
+      }
+  };
+
+  const handleSaveBrand = async () => {
+      if(!brandNameInput) return;
+      await updateBrandName(brandNameInput);
+      alert('Đã cập nhật tên thương hiệu! Vui lòng đăng nhập lại để thấy thay đổi.');
   };
 
   const NavTab = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => (
@@ -73,28 +129,22 @@ const OwnerDashboard: React.FC = () => {
   return (
     <Layout role={UserRole.OWNER} title="Quản Lý Thương Hiệu">
        
-       {/* 1. TOP NAVIGATION (MATCHING WIREFRAME) */}
        <div className="bg-white border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
            <div className="flex">
                <NavTab id="dashboard" label="Dashboard" icon={<LayoutDashboard size={18}/>} />
-               <NavTab id="customers" label="Khách hàng" icon={<Users size={18}/>} />
-               <NavTab id="packages" label="Gói dịch vụ" icon={<Package size={18}/>} />
-               <NavTab id="qr" label="QR" icon={<QrCode size={18}/>} />
-               <NavTab id="staff" label="NV" icon={<User size={18}/>} />
                <NavTab id="branches" label="Chi nhánh" icon={<MapPin size={18}/>} />
-               <NavTab id="reports" label="Báo cáo" icon={<FileText size={18}/>} />
+               <NavTab id="staff" label="Nhân viên" icon={<UserIcon size={18}/>} />
+               <NavTab id="qr" label="QR Kiosk" icon={<QrCode size={18}/>} />
                <NavTab id="settings" label="Cài đặt" icon={<Settings size={18}/>} />
            </div>
        </div>
 
-       {/* MAIN DASHBOARD CONTENT */}
+       {/* DASHBOARD TAB */}
        {activeTab === 'dashboard' && (
-           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-               
-               {/* Branch Filter */}
+           <div className="space-y-6 animate-in fade-in">
                <div className="flex justify-end">
                    <select 
-                    className="p-2 border rounded-lg bg-white text-sm shadow-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                    className="p-2 border rounded-lg bg-white text-sm shadow-sm"
                     value={selectedBranch}
                     onChange={e => setSelectedBranch(e.target.value)}
                    >
@@ -103,121 +153,145 @@ const OwnerDashboard: React.FC = () => {
                    </select>
                </div>
 
-               {/* 2. STAT CARDS */}
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                   <StatCard 
-                        icon={<Activity size={24}/>} 
-                        label="Tổng Check-in" 
-                        value={`${stats.todayCheckins} lượt`} 
-                        color="bg-blue-600 text-blue-600"
-                    />
-                   <StatCard 
-                        icon={<Users size={24}/>} 
-                        label="Khách đang HD" 
-                        value={`${stats.activeTickets} khách`} 
-                        color="bg-green-600 text-green-600"
-                    />
-                   <StatCard 
-                        icon={<AlertTriangle size={24}/>} 
-                        label="Gói sắp hết" 
-                        value={`${stats.expiringSoon} khách`} 
-                        color="bg-orange-500 text-orange-500"
-                    />
-                   <StatCard 
-                        icon={<XCircle size={24}/>} 
-                        label="Hết hạn" 
-                        value={`${stats.expiredTickets} khách`} 
-                        color="bg-red-500 text-red-500"
-                    />
+                   <StatCard icon={<Activity size={24}/>} label="Tổng Check-in" value={`${stats.totalCheckins} lượt`} color="bg-blue-600 text-blue-600" />
+                   <StatCard icon={<Users size={24}/>} label="Khách đang HD" value={`${stats.activeTickets} khách`} color="bg-green-600 text-green-600" />
+                   <StatCard icon={<AlertTriangle size={24}/>} label="Gói sắp hết" value={`${stats.expiringSoon} khách`} color="bg-orange-500 text-orange-500" />
+                   <StatCard icon={<XCircle size={24}/>} label="Hết hạn" value={`${stats.expiredTickets} khách`} color="bg-red-500 text-red-500" />
                </div>
 
-               {/* 3. CHART SECTION */}
                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                   <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Biểu đồ Check-in theo giờ</h3>
+                   <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Biểu đồ Check-in hôm nay</h3>
                    <div className="h-80 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb"/>
                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dy={10} />
                                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
-                                <Tooltip 
-                                    cursor={{fill: '#f3f4f6'}}
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                                />
+                                <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px' }} />
                                 <Bar dataKey="v" fill="#16a34a" radius={[4, 4, 0, 0]} barSize={40} />
                             </BarChart>
                         </ResponsiveContainer>
                    </div>
                </div>
+           </div>
+       )}
 
-               {/* 4. RECENT ACTIVITY TABLE */}
-               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                   <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-                       <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Khách gần đây</h3>
-                       <button className="text-sm text-brand-600 font-bold hover:underline">Xem tất cả</button>
-                   </div>
-                   <div className="overflow-x-auto">
+       {/* BRANCHES TAB */}
+       {activeTab === 'branches' && (
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
+               <div className="space-y-4">
+                   <h3 className="font-bold text-lg">Danh sách Chi nhánh</h3>
+                   {branches.length === 0 && <p className="text-gray-500">Chưa có chi nhánh nào.</p>}
+                   {branches.map(b => (
+                       <div key={b.id} className="p-4 bg-white border rounded-xl shadow-sm flex justify-between items-center">
+                           <div>
+                               <div className="font-bold text-brand-600">{b.name}</div>
+                               <div className="text-sm text-gray-500">{b.address}</div>
+                           </div>
+                           <button onClick={() => handleDeleteBranch(b.id)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18}/></button>
+                       </div>
+                   ))}
+               </div>
+               <div className="bg-gray-50 p-6 rounded-xl h-fit">
+                   <h3 className="font-bold text-lg mb-4">Thêm Chi nhánh</h3>
+                   <form onSubmit={handleCreateBranch} className="space-y-4">
+                       <input className="w-full p-2 border rounded" placeholder="Tên chi nhánh (VD: Yoga An An - Q1)" value={newBranchName} onChange={e=>setNewBranchName(e.target.value)} required />
+                       <input className="w-full p-2 border rounded" placeholder="Địa chỉ" value={newBranchAddr} onChange={e=>setNewBranchAddr(e.target.value)} required />
+                       <button type="submit" className="w-full py-2 bg-brand-600 text-white font-bold rounded">Tạo Chi Nhánh</button>
+                   </form>
+               </div>
+           </div>
+       )}
+
+       {/* STAFF TAB */}
+       {activeTab === 'staff' && (
+           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in">
+               <div className="md:col-span-2 space-y-4">
+                   <h3 className="font-bold text-lg">Danh sách Nhân viên</h3>
+                   <div className="bg-white border rounded-xl overflow-hidden">
                        <table className="w-full text-sm text-left">
-                           <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
-                               <tr>
-                                   <th className="px-6 py-4">Tên KH</th>
-                                   <th className="px-6 py-4">SĐT</th>
-                                   <th className="px-6 py-4">Gói</th>
-                                   <th className="px-6 py-4">Thời gian</th>
-                                   <th className="px-6 py-4">Trạng thái</th>
-                               </tr>
+                           <thead className="bg-gray-50 font-bold">
+                               <tr><th className="p-3">Tên</th><th className="p-3">SĐT</th><th className="p-3">Chi nhánh</th><th className="p-3 text-right">Thao tác</th></tr>
                            </thead>
-                           <tbody className="divide-y divide-gray-100">
-                               {recentLogs.length === 0 ? (
-                                   <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-400">Chưa có dữ liệu check-in hôm nay</td></tr>
-                               ) : (
-                                   recentLogs.map(log => (
-                                       <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                                           <td className="px-6 py-4 font-bold text-gray-900">{log.user_name}</td>
-                                           <td className="px-6 py-4 font-mono text-gray-500">{log.user_phone}</td>
-                                           <td className="px-6 py-4">
-                                                {/* Normally we'd join Ticket Type here, simplifying for UI demo */}
-                                                <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs font-bold">Vé Tập</span>
-                                           </td>
-                                           <td className="px-6 py-4 text-gray-600">{new Date(log.timestamp).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}</td>
-                                           <td className="px-6 py-4">
-                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                                   log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                               }`}>
-                                                   {log.status === 'SUCCESS' ? 'Thành công' : 'Thất bại'}
-                                               </span>
+                           <tbody className="divide-y">
+                               {staffList.map(s => {
+                                   const branch = branches.find(b => b.id === s.branch_id);
+                                   return (
+                                       <tr key={s.id}>
+                                           <td className="p-3 font-medium">{s.name}</td>
+                                           <td className="p-3">{s.phone}</td>
+                                           <td className="p-3 text-gray-500">{branch?.name || 'Chưa phân'}</td>
+                                           <td className="p-3 text-right">
+                                               <button onClick={() => handleDeleteStaff(s.id)} className="text-red-500 hover:underline">Xóa</button>
                                            </td>
                                        </tr>
-                                   ))
-                               )}
+                                   )
+                               })}
                            </tbody>
                        </table>
                    </div>
                </div>
+               <div className="bg-gray-50 p-6 rounded-xl h-fit">
+                   <h3 className="font-bold text-lg mb-4">Thêm Nhân viên</h3>
+                   <form onSubmit={handleCreateStaff} className="space-y-3">
+                       <input className="w-full p-2 border rounded" placeholder="Họ tên" value={newStaffName} onChange={e=>setNewStaffName(e.target.value)} required />
+                       <input className="w-full p-2 border rounded" placeholder="Số điện thoại" value={newStaffPhone} onChange={e=>setNewStaffPhone(e.target.value)} required />
+                       <input className="w-full p-2 border rounded" placeholder="Mật khẩu" value={newStaffPass} onChange={e=>setNewStaffPass(e.target.value)} required />
+                       <select className="w-full p-2 border rounded" value={newStaffBranch} onChange={e=>setNewStaffBranch(e.target.value)} required>
+                           <option value="">Chọn chi nhánh làm việc</option>
+                           {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                       </select>
+                       <button type="submit" className="w-full py-2 bg-brand-600 text-white font-bold rounded">Thêm Nhân Viên</button>
+                   </form>
+               </div>
+           </div>
+       )}
 
-               {/* 5. ACTIONS FOOTER */}
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                   <button onClick={() => exportData('logs', 'owner1')} className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
-                       <Download className="mr-2 text-brand-600" size={20}/> Xuất dữ liệu (JSON)
-                   </button>
-                   <button className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
-                       <FileSpreadsheet className="mr-2 text-green-600" size={20}/> Tải Excel
-                   </button>
-                   <button onClick={() => window.print()} className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
-                       <Printer className="mr-2 text-gray-600" size={20}/> In Báo Cáo PDF
+       {/* QR KIOSK TAB */}
+       {activeTab === 'qr' && (
+           <div className="animate-in fade-in">
+               <h3 className="font-bold text-lg mb-4">Mã QR Check-in Kiosk</h3>
+               <p className="text-gray-500 mb-6">In mã QR này và dán tại quầy lễ tân để khách tự check-in.</p>
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   {branches.map(b => {
+                       const link = `${window.location.origin}/#/checkin?shop_id=${b.id}`;
+                       return (
+                           <div key={b.id} className="bg-white p-6 rounded-xl border shadow-sm text-center">
+                               <h4 className="font-bold text-brand-600 mb-4">{b.name}</h4>
+                               <div className="bg-white inline-block p-2 border-2 border-black rounded mb-4">
+                                   <QRCode value={link} size={150} />
+                               </div>
+                               <p className="text-xs text-gray-400 break-all mb-4">{link}</p>
+                               <button onClick={() => window.print()} className="w-full py-2 bg-gray-100 font-bold rounded hover:bg-gray-200">In QR này</button>
+                           </div>
+                       )
+                   })}
+               </div>
+           </div>
+       )}
+
+       {/* SETTINGS TAB */}
+       {activeTab === 'settings' && (
+           <div className="max-w-md animate-in fade-in">
+               <h3 className="font-bold text-lg mb-4">Cài đặt Thương hiệu</h3>
+               <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+                   <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-1">Tên hiển thị thương hiệu</label>
+                       <input 
+                            className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-500" 
+                            placeholder="VD: Yoga An An"
+                            value={brandNameInput}
+                            onChange={e => setBrandNameInput(e.target.value)}
+                        />
+                   </div>
+                   <button onClick={handleSaveBrand} className="w-full py-2 bg-brand-600 text-white font-bold rounded flex items-center justify-center">
+                       <Save size={18} className="mr-2"/> Lưu Thay Đổi
                    </button>
                </div>
            </div>
        )}
 
-       {/* Placeholder for other tabs */}
-       {activeTab !== 'dashboard' && (
-           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-               <Settings size={48} className="mb-4 opacity-20"/>
-               <h3 className="text-lg font-bold">Đang phát triển module: {activeTab}</h3>
-               <p>Tính năng này sẽ sớm được cập nhật.</p>
-           </div>
-       )}
     </Layout>
   );
 };

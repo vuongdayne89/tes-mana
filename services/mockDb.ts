@@ -569,21 +569,25 @@ export const toggleTicketLock = async (ticketId: string, performerId: string) =>
     if (isSupabaseConfigured()) { await supabase.rpc('toggle_ticket_lock', { t_id: ticketId }); }
 };
 export const resetPin = async (phone: string, performerId: string) => { return changePin(phone, 'IGNORE', '1234'); };
+
 export const getStaffUsers = async (): Promise<User[]> => {
     const tid = getTenantId();
     if (!tid) return [];
     if (isSupabaseConfigured()) {
-        const { data } = await supabase.from('users').select('*').eq('role', UserRole.STAFF).eq('tenant_id', tid);
-        return (data as User[]) || [];
+        // Need to join branches to get branch name, or do a second query.
+        // For simplicity, we fetch all branches of tenant and map.
+        const { data: users } = await supabase.from('users').select('*').eq('role', UserRole.STAFF).eq('tenant_id', tid);
+        return (users as User[]) || [];
     }
     return getLocalDB().users.filter(u => u.role === UserRole.STAFF && u.tenant_id === tid);
 };
+
 export const addStaff = async (staffData: Partial<User>, performerId: string) => {
     const tid = getTenantId();
     const newUser = {
         id: `staff_${Date.now()}`, tenant_id: tid,
         name: staffData.name || 'Nhân viên mới', phone: staffData.phone || '',
-        role: UserRole.STAFF, branch_id: staffData.branch_id || 'anan1', password: 'password123'
+        role: UserRole.STAFF, branch_id: staffData.branch_id, password: staffData.password || 'password123'
     };
     if (isSupabaseConfigured()) { await supabase.from('users').insert(newUser); }
     else { const db = getLocalDB(); db.users.push(newUser as User); saveLocalDB(db); }
@@ -669,15 +673,36 @@ export const getDashboardStats = async (branchId?: string) => {
     };
 };
 
-// --- CHART DATA (Mocked for UI demonstration) ---
-export const getHourlyChartData = async () => {
-    // In a real app, we would aggregate checkin_logs by hour using Supabase RPC
-    return [
-        { name: '6h', v: 5 }, { name: '7h', v: 12 }, { name: '8h', v: 18 },
-        { name: '9h', v: 8 }, { name: '10h', v: 5 }, { name: '11h', v: 3 },
-        { name: '16h', v: 10 }, { name: '17h', v: 25 }, { name: '18h', v: 30 },
-        { name: '19h', v: 22 }, { name: '20h', v: 10 }
-    ];
+// --- CHART DATA (REAL DATA) ---
+export const getHourlyChartData = async (branchId?: string) => {
+    const tid = getTenantId();
+    if (!tid) return Array(24).fill(0).map((_, i) => ({ name: `${i}h`, v: 0 }));
+
+    const hours = Array(24).fill(0);
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    if (isSupabaseConfigured()) {
+        let query = supabase.from('checkin_logs').select('timestamp').eq('tenant_id', tid).gte('timestamp', todayStr);
+        if (branchId) query = query.eq('branch_id', branchId);
+        const { data } = await query;
+
+        if (data) {
+            data.forEach((log: any) => {
+                const h = new Date(log.timestamp).getHours();
+                hours[h]++;
+            });
+        }
+    } else {
+        const db = getLocalDB();
+        let logs = db.checkin_logs.filter(l => l.tenant_id === tid && l.timestamp.startsWith(todayStr));
+        if (branchId) logs = logs.filter(l => l.branch_id === branchId);
+        logs.forEach(l => {
+            const h = new Date(l.timestamp).getHours();
+            hours[h]++;
+        });
+    }
+
+    return hours.map((count, i) => ({ name: `${i}h`, v: count }));
 };
 
 export const exportData = async (type: 'logs' | 'tickets', performerId: string) => { return { url: '#' }; };
