@@ -1,14 +1,13 @@
-
 import React from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { UserRole } from '../types';
 import { Users, LayoutDashboard, QrCode, ShieldCheck } from 'lucide-react';
 
 const Landing: React.FC = () => {
-  const history = useHistory();
+  const navigate = useNavigate();
 
   const handleNavigateToLogin = (role: UserRole) => {
-    history.push(`/login?role=${role}`);
+    navigate(`/login?role=${role}`);
   };
 
   return (
@@ -23,7 +22,7 @@ const Landing: React.FC = () => {
 
           <div className="space-y-3">
              <button
-              onClick={() => history.push('/checkin?shop_id=anan1')}
+              onClick={() => navigate('/checkin?shop_id=anan1')}
               className="w-full flex items-center justify-center p-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl transition-colors font-semibold shadow-lg shadow-brand-200"
             >
               <QrCode className="mr-3" />

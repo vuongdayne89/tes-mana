@@ -1,338 +1,225 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, Ticket, AuditLog, TicketType, User, CustomerDetail, Branch } from '../types';
+import { UserRole, Ticket, CheckInLog, Branch } from '../types';
 import { 
-  getAllTickets, getDashboardStats, createTicket, toggleTicketLock, 
-  resetPin, getAuditLogs, getStaffUsers, addStaff, removeStaff, updateTicket, 
-  generateDayPassToken, generateStaticTicketQR, getCustomerFullDetails, deleteTicket, 
-  updateBrandName, getSession, getBranches, createBranch, deleteBranch
+  getDashboardStats, getHourlyChartData, getCheckInLogs, getBranches, getTicketsByPhone,
+  exportData
 } from '../services/mockDb';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { 
-  Users, CreditCard, AlertTriangle, Activity, Lock, Unlock, 
-  FileDown, Plus, Search, Trash2, Edit, QrCode, X, Printer, Settings, MapPin
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
+} from 'recharts';
+import { 
+  Activity, Users, AlertTriangle, XCircle, Download, FileSpreadsheet, Printer,
+  LayoutDashboard, User, Package, QrCode, MapPin, FileText, Settings
 } from 'lucide-react';
-import QRCode from "react-qr-code";
 
 const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string | number, color: string }> = ({ icon, label, value, color }) => (
-    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
-        <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-${color.replace('bg-', '')}`}>
-            {icon}
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between h-full hover:shadow-md transition-shadow">
+        <div className="flex justify-between items-start mb-4">
+             <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-${color.replace('bg-', '')}`}>
+                {icon}
+            </div>
+             {/* Optional Badge/Trend could go here */}
         </div>
         <div>
-            <p className="text-gray-500 text-xs uppercase font-bold">{label}</p>
-            <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
+            <h3 className="text-3xl font-bold text-gray-900 mb-1">{value}</h3>
+            <p className="text-gray-500 text-sm font-medium uppercase tracking-wide">{label}</p>
         </div>
     </div>
 );
 
 const OwnerDashboard: React.FC = () => {
-  const [activeView, setActiveView] = useState<'overview' | 'tickets' | 'staff' | 'branches' | 'logs' | 'config'>('overview');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState<any>(null);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [staff, setStaff] = useState<User[]>([]);
+  const [hourlyData, setHourlyData] = useState<any[]>([]);
+  const [recentLogs, setRecentLogs] = useState<CheckInLog[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [showBranchModal, setShowBranchModal] = useState(false);
-  const [qrModalData, setQrModalData] = useState<{token: string, ticket: Ticket, title: string, subtitle?: string} | null>(null);
-  
-  // Forms
-  const [newTicketPhone, setNewTicketPhone] = useState('');
-  const [newTicketName, setNewTicketName] = useState('');
-  const [newTicketType, setNewTicketType] = useState(TicketType.SESSION_12);
-  const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
-  
-  const [newStaffName, setNewStaffName] = useState('');
-  const [newStaffPhone, setNewStaffPhone] = useState('');
-  const [newStaffBranch, setNewStaffBranch] = useState('');
-  
-  const [newBranchName, setNewBranchName] = useState('');
-  const [newBranchAddr, setNewBranchAddr] = useState('');
-  
-  const [searchPhone, setSearchPhone] = useState('');
-  const [viewingCustomer, setViewingCustomer] = useState<CustomerDetail | null>(null);
-  const [brandName, setBrandName] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState('');
+
+  useEffect(() => {
+    loadData();
+  }, [selectedBranch]);
 
   const loadData = async () => {
-    getDashboardStats().then(setStats);
-    getAllTickets().then(setTickets);
-    getAuditLogs().then(setAuditLogs);
-    getStaffUsers().then(setStaff);
-    getBranches().then(res => {
-        setBranches(res);
-        if(res.length > 0 && !newStaffBranch) setNewStaffBranch(res[0].id);
-    });
-    const s = getSession();
-    if(s && s.tenantName) setBrandName(s.tenantName);
+    const b = await getBranches();
+    setBranches(b);
+    
+    const s = await getDashboardStats(selectedBranch || undefined);
+    setStats(s);
+    
+    const h = await getHourlyChartData();
+    setHourlyData(h);
+
+    // Get logs and we'd ideally join with user/ticket info here or fetch ticket details for each log
+    // For this UI demo, we'll use the log info directly and assume some data
+    const logs = await getCheckInLogs(); 
+    setRecentLogs(logs.slice(0, 10)); // Top 10 recent
   };
 
-  useEffect(() => { loadData(); }, [activeView]);
+  const NavTab = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => (
+      <button 
+        onClick={() => setActiveTab(id)}
+        className={`flex items-center px-4 py-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap
+        ${activeTab === id ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+      >
+          {icon}
+          <span className="ml-2">{label}</span>
+      </button>
+  );
 
-  const handleCreateBranch = async (e: React.FormEvent) => {
-      e.preventDefault();
-      await createBranch(newBranchName, newBranchAddr);
-      setShowBranchModal(false); setNewBranchName(''); setNewBranchAddr(''); loadData();
-  };
-
-  const handleDeleteBranch = async (id: string) => {
-      if(confirm('Xóa chi nhánh này?')) {
-          await deleteBranch(id);
-          loadData();
-      }
-  };
-
-  // ... (Other handlers same as previous)
-  const handleUpdateBrand = async () => { await updateBrandName(brandName); alert('Cập nhật thành công!'); window.location.reload(); };
-  const handleCreateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const newTicket = await createTicket({ owner_phone: newTicketPhone, owner_name: newTicketName, type: newTicketType }, 'owner1');
-    setShowCreateModal(false); setNewTicketPhone(''); setNewTicketName('');
-    if (newTicket) {
-        const token = await generateStaticTicketQR(newTicket);
-        setQrModalData({ token, ticket: newTicket, title: "THẺ THÀNH VIÊN", subtitle: "Mã QR cố định" });
-        loadData();
-    }
-  };
-  const handleSearchCustomer = async () => {
-      if(!searchPhone) return;
-      const details = await getCustomerFullDetails(searchPhone);
-      if(details) setViewingCustomer(details); else alert('Không tìm thấy khách hàng');
-  };
-  const handleEditTicketClick = (ticket: Ticket) => { setEditingTicket(ticket); setShowEditModal(true); };
-  const handleUpdateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingTicket) return;
-    await updateTicket(editingTicket.ticket_id, { remaining_uses: editingTicket.remaining_uses, expires_at: editingTicket.expires_at }, 'owner1');
-    setShowEditModal(false); setEditingTicket(null); loadData();
-  };
-  const handleLock = async (id: string) => { await toggleTicketLock(id, 'owner1'); loadData(); };
-  const handleDelete = async (id: string) => { if(confirm('Xóa vĩnh viễn?')) { await deleteTicket(id); loadData(); } };
-  const handleShowDayPass = async (ticket: Ticket) => {
-      const token = await generateDayPassToken(ticket.ticket_id);
-      setQrModalData({ token, ticket, title: "QR TRONG NGÀY", subtitle: `Hạn dùng: ${new Date().toLocaleDateString('vi-VN')}` });
-  };
-  const handleAddStaff = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await addStaff({ name: newStaffName, phone: newStaffPhone, branch_id: newStaffBranch }, 'owner1');
-    setShowAddStaffModal(false); setNewStaffName(''); setNewStaffPhone(''); loadData();
-  };
-  const handleRemoveStaff = async (id: string) => { if(confirm('Xóa nhân viên?')) { await removeStaff(id, 'owner1'); loadData(); } };
-
-  if (!stats) return <div className="p-8 text-center">Đang tải...</div>;
+  if (!stats) return <div className="p-10 text-center text-gray-500">Đang tải dữ liệu...</div>;
 
   return (
     <Layout role={UserRole.OWNER} title="Quản Lý Thương Hiệu">
-       <div className="flex space-x-4 mb-6 border-b border-gray-200 pb-1 overflow-x-auto">
-        {['overview', 'tickets', 'branches', 'staff', 'logs', 'config'].map(v => (
-             <button key={v} onClick={() => setActiveView(v as any)} className={`px-4 py-2 font-medium text-sm border-b-2 whitespace-nowrap uppercase ${activeView === v ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'}`}>{v}</button>
-        ))}
-      </div>
-
-      {viewingCustomer && (
-            <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
-                <div className="bg-white w-full max-w-2xl rounded-xl p-6 max-h-[90vh] overflow-y-auto relative">
-                    <button onClick={() => setViewingCustomer(null)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
-                    <div className="flex items-center mb-6 border-b pb-4">
-                        <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 mr-4"><Users size={32} /></div>
-                        <div><h2 className="text-xl font-bold">{viewingCustomer.user.name}</h2><p className="text-gray-500 font-mono">{viewingCustomer.user.phone}</p></div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div>
-                            <h3 className="font-bold text-gray-700 mb-3">Danh sách vé</h3>
-                            {viewingCustomer.tickets.map(t => (
-                                <div key={t.ticket_id} className="border p-3 rounded-lg mb-2 bg-gray-50 flex justify-between items-start">
-                                    <div><div className="font-bold">{t.type_label || t.type}</div><div className="text-sm">Còn: {t.remaining_uses}</div></div>
-                                    <button onClick={() => { if(confirm('Xóa vé?')) deleteTicket(t.ticket_id).then(() => handleSearchCustomer()) }} className="text-red-500 p-1"><Trash2 size={16} /></button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
-      )}
-
-      {activeView === 'overview' && (
-        <div className="space-y-6 animate-in fade-in duration-500">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard icon={<Activity className="text-blue-600"/>} label="Lượt check-in" value={stats.todayCheckins} color="bg-blue-100" />
-                <StatCard icon={<Users className="text-green-600"/>} label="Vé Hoạt Động" value={stats.activeTickets} color="bg-green-100" />
-                <StatCard icon={<AlertTriangle className="text-orange-600"/>} label="Sắp hết hạn" value={stats.expiringSoon} color="bg-orange-100" />
-                <StatCard icon={<CreditCard className="text-purple-600"/>} label="Tổng Lượt" value={stats.totalCheckins} color="bg-purple-100" />
-            </div>
-             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                <h3 className="font-bold text-gray-700 mb-4">Biểu đồ hoạt động</h3>
-                <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={[{name:'CN',v:10}, {name:'T2',v:20}, {name:'T3',v:15}, {name:'T4',v:30}]}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                            <YAxis axisLine={false} tickLine={false} />
-                            <Tooltip />
-                            <Bar dataKey="v" fill="#16a34a" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {activeView === 'branches' && (
-          <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-gray-700">Chi nhánh ({branches.length})</h3>
-                  <button onClick={() => setShowBranchModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Thêm Chi Nhánh</button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {branches.map(b => (
-                      <div key={b.id} className="bg-white p-4 rounded-xl border shadow-sm flex justify-between items-center">
-                          <div className="flex items-center">
-                              <div className="bg-brand-100 p-3 rounded-full text-brand-600 mr-3"><MapPin size={20}/></div>
-                              <div>
-                                  <h4 className="font-bold">{b.name}</h4>
-                                  <p className="text-sm text-gray-500">{b.address}</p>
-                              </div>
-                          </div>
-                          <button onClick={() => handleDeleteBranch(b.id)} className="text-red-500 hover:bg-red-50 p-2 rounded"><Trash2 size={18}/></button>
-                      </div>
-                  ))}
-              </div>
-          </div>
-      )}
-
-      {activeView === 'staff' && (
-           <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-gray-700">Nhân viên ({staff.length})</h3>
-                  <button onClick={() => setShowAddStaffModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Thêm</button>
-              </div>
-               <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-xs"><tr><th className="p-4">Tên</th><th className="p-4">SĐT</th><th className="p-4">Chi nhánh</th><th className="p-4 text-right">Xóa</th></tr></thead>
-                      <tbody>
-                          {staff.map(s => (
-                              <tr key={s.id} className="border-b hover:bg-gray-50">
-                                  <td className="p-4 font-bold">{s.name}</td><td className="p-4">{s.phone}</td>
-                                  <td className="p-4">{branches.find(b=>b.id===s.branch_id)?.name || s.branch_id}</td>
-                                  <td className="p-4 text-right"><button onClick={() => handleRemoveStaff(s.id)} className="text-red-500"><Trash2 size={16} /></button></td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
+       
+       {/* 1. TOP NAVIGATION (MATCHING WIREFRAME) */}
+       <div className="bg-white border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
+           <div className="flex">
+               <NavTab id="dashboard" label="Dashboard" icon={<LayoutDashboard size={18}/>} />
+               <NavTab id="customers" label="Khách hàng" icon={<Users size={18}/>} />
+               <NavTab id="packages" label="Gói dịch vụ" icon={<Package size={18}/>} />
+               <NavTab id="qr" label="QR" icon={<QrCode size={18}/>} />
+               <NavTab id="staff" label="NV" icon={<User size={18}/>} />
+               <NavTab id="branches" label="Chi nhánh" icon={<MapPin size={18}/>} />
+               <NavTab id="reports" label="Báo cáo" icon={<FileText size={18}/>} />
+               <NavTab id="settings" label="Cài đặt" icon={<Settings size={18}/>} />
            </div>
-      )}
+       </div>
 
-      {/* REUSED MODALS */}
-      {showBranchModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                  <h3 className="font-bold text-lg mb-4">Thêm Chi Nhánh Mới</h3>
-                  <form onSubmit={handleCreateBranch} className="space-y-4">
-                      <input className="w-full p-2 border rounded" placeholder="Tên chi nhánh" value={newBranchName} onChange={e=>setNewBranchName(e.target.value)} required />
-                      <input className="w-full p-2 border rounded" placeholder="Địa chỉ" value={newBranchAddr} onChange={e=>setNewBranchAddr(e.target.value)} required />
-                      <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={() => setShowBranchModal(false)} className="px-4 py-2 bg-gray-200 rounded">Hủy</button><button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded font-bold">Tạo</button></div>
-                  </form>
-              </div>
-          </div>
-      )}
+       {/* MAIN DASHBOARD CONTENT */}
+       {activeTab === 'dashboard' && (
+           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+               
+               {/* Branch Filter */}
+               <div className="flex justify-end">
+                   <select 
+                    className="p-2 border rounded-lg bg-white text-sm shadow-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                    value={selectedBranch}
+                    onChange={e => setSelectedBranch(e.target.value)}
+                   >
+                       <option value="">Tất cả chi nhánh</option>
+                       {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                   </select>
+               </div>
 
-      {showAddStaffModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                  <h3 className="font-bold text-lg mb-4">Thêm Nhân Viên</h3>
-                  <form onSubmit={handleAddStaff} className="space-y-4">
-                      <input className="w-full p-2 border rounded" placeholder="Họ tên" value={newStaffName} onChange={e=>setNewStaffName(e.target.value)} required />
-                      <input className="w-full p-2 border rounded" placeholder="SĐT" value={newStaffPhone} onChange={e=>setNewStaffPhone(e.target.value)} required />
-                      <select className="w-full p-2 border rounded" value={newStaffBranch} onChange={e=>setNewStaffBranch(e.target.value)}>
-                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
-                      <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={() => setShowAddStaffModal(false)} className="px-4 py-2 bg-gray-200 rounded">Hủy</button><button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded font-bold">Thêm</button></div>
-                  </form>
-              </div>
-          </div>
-      )}
+               {/* 2. STAT CARDS */}
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                   <StatCard 
+                        icon={<Activity size={24}/>} 
+                        label="Tổng Check-in" 
+                        value={`${stats.todayCheckins} lượt`} 
+                        color="bg-blue-600 text-blue-600"
+                    />
+                   <StatCard 
+                        icon={<Users size={24}/>} 
+                        label="Khách đang HD" 
+                        value={`${stats.activeTickets} khách`} 
+                        color="bg-green-600 text-green-600"
+                    />
+                   <StatCard 
+                        icon={<AlertTriangle size={24}/>} 
+                        label="Gói sắp hết" 
+                        value={`${stats.expiringSoon} khách`} 
+                        color="bg-orange-500 text-orange-500"
+                    />
+                   <StatCard 
+                        icon={<XCircle size={24}/>} 
+                        label="Hết hạn" 
+                        value={`${stats.expiredTickets} khách`} 
+                        color="bg-red-500 text-red-500"
+                    />
+               </div>
 
-      {activeView === 'config' && (
-          <div className="max-w-lg bg-white p-8 rounded-xl border shadow-sm">
-              <h3 className="font-bold text-lg mb-6 flex items-center"><Settings className="mr-2" /> Cấu Hình Thương Hiệu</h3>
-              <div className="space-y-4">
-                  <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Tên hiển thị (Dashboard)</label>
-                      <input type="text" className="w-full p-3 border rounded-lg" value={brandName} onChange={e => setBrandName(e.target.value)} />
-                  </div>
-                  <button onClick={handleUpdateBrand} className="w-full bg-brand-600 text-white py-3 rounded-lg font-bold hover:bg-brand-700">Lưu Thay Đổi</button>
-              </div>
-          </div>
-      )}
+               {/* 3. CHART SECTION */}
+               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                   <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Biểu đồ Check-in theo giờ</h3>
+                   <div className="h-80 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb"/>
+                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dy={10} />
+                                <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
+                                <Tooltip 
+                                    cursor={{fill: '#f3f4f6'}}
+                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                                />
+                                <Bar dataKey="v" fill="#16a34a" radius={[4, 4, 0, 0]} barSize={40} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                   </div>
+               </div>
 
-      {/* Tickets & QR Modals are kept similar but hidden for brevity in XML unless changed */}
-      {activeView === 'tickets' && (
-          <div className="space-y-4">
-               <div className="flex justify-between items-center flex-wrap gap-2">
-                  <div className="flex items-center space-x-2">
-                      <h3 className="font-bold text-gray-700">Danh sách vé</h3>
-                      <div className="relative"><input type="text" placeholder="Tìm SĐT..." className="pl-8 pr-2 py-1 border rounded text-sm" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} /><Search size={14} className="absolute left-2 top-2 text-gray-400" /></div>
-                      <button onClick={handleSearchCustomer} className="text-sm bg-gray-100 px-3 py-1 rounded hover:bg-gray-200">Tìm</button>
-                  </div>
-                  <button onClick={() => setShowCreateModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center shadow"><Plus size={18} className="mr-2" /> Tạo Vé Mới</button>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-xs">
-                          <tr><th className="p-4">ID</th><th className="p-4">Khách</th><th className="p-4">Loại</th><th className="p-4">Hạn</th><th className="p-4 text-right">Thao tác</th></tr>
-                      </thead>
-                      <tbody>
-                          {tickets.map(t => (
-                              <tr key={t.ticket_id} className="border-b hover:bg-gray-50">
-                                  <td className="p-4 font-mono">{t.ticket_id}</td>
-                                  <td className="p-4">{t.owner_name}<br/><span className="text-xs text-gray-400">{t.owner_phone}</span></td>
-                                  <td className="p-4"><span className="px-2 py-1 bg-gray-100 rounded text-xs">{t.type_label}</span></td>
-                                  <td className="p-4">{new Date(t.expires_at).toLocaleDateString('vi-VN')}</td>
-                                  <td className="p-4 flex justify-end space-x-2">
-                                      <button onClick={() => handleShowDayPass(t)} className="p-2 bg-blue-50 text-blue-600 rounded"><QrCode size={16} /></button>
-                                      <button onClick={() => handleEditTicketClick(t)} className="p-2 bg-gray-100 text-gray-600 rounded"><Edit size={16} /></button>
-                                      <button onClick={() => handleDelete(t.ticket_id)} className="p-2 bg-red-50 text-red-600 rounded"><Trash2 size={16} /></button>
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-      )}
+               {/* 4. RECENT ACTIVITY TABLE */}
+               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                   <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+                       <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Khách gần đây</h3>
+                       <button className="text-sm text-brand-600 font-bold hover:underline">Xem tất cả</button>
+                   </div>
+                   <div className="overflow-x-auto">
+                       <table className="w-full text-sm text-left">
+                           <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
+                               <tr>
+                                   <th className="px-6 py-4">Tên KH</th>
+                                   <th className="px-6 py-4">SĐT</th>
+                                   <th className="px-6 py-4">Gói</th>
+                                   <th className="px-6 py-4">Thời gian</th>
+                                   <th className="px-6 py-4">Trạng thái</th>
+                               </tr>
+                           </thead>
+                           <tbody className="divide-y divide-gray-100">
+                               {recentLogs.length === 0 ? (
+                                   <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-400">Chưa có dữ liệu check-in hôm nay</td></tr>
+                               ) : (
+                                   recentLogs.map(log => (
+                                       <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                                           <td className="px-6 py-4 font-bold text-gray-900">{log.user_name}</td>
+                                           <td className="px-6 py-4 font-mono text-gray-500">{log.user_phone}</td>
+                                           <td className="px-6 py-4">
+                                                {/* Normally we'd join Ticket Type here, simplifying for UI demo */}
+                                                <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs font-bold">Vé Tập</span>
+                                           </td>
+                                           <td className="px-6 py-4 text-gray-600">{new Date(log.timestamp).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}</td>
+                                           <td className="px-6 py-4">
+                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                                   log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                               }`}>
+                                                   {log.status === 'SUCCESS' ? 'Thành công' : 'Thất bại'}
+                                               </span>
+                                           </td>
+                                       </tr>
+                                   ))
+                               )}
+                           </tbody>
+                       </table>
+                   </div>
+               </div>
 
-      {showCreateModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                  <h3 className="font-bold text-lg mb-4">Tạo vé mới</h3>
-                  <form onSubmit={handleCreateTicket} className="space-y-4">
-                      <input type="text" placeholder="Tên khách" required className="w-full p-2 border rounded" value={newTicketName} onChange={e => setNewTicketName(e.target.value)} />
-                      <input type="tel" placeholder="SĐT" required className="w-full p-2 border rounded" value={newTicketPhone} onChange={e => setNewTicketPhone(e.target.value)} />
-                      <select className="w-full p-2 border rounded" value={newTicketType} onChange={e => setNewTicketType(e.target.value as TicketType)}>
-                          <option value={TicketType.SESSION_12}>Gói 12 Buổi</option><option value={TicketType.SESSION_20}>Gói 20 Buổi</option><option value={TicketType.MONTHLY}>Gói Tháng</option>
-                      </select>
-                      <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 bg-gray-200 rounded">Hủy</button><button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded font-bold">Tạo</button></div>
-                  </form>
-              </div>
-          </div>
-      )}
-      
-      {qrModalData && (
-            <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl w-full max-w-xs relative p-6 text-center">
-                    <button onClick={() => setQrModalData(null)} className="absolute top-3 right-3 p-1 bg-gray-100 rounded-full"><X size={20} /></button>
-                    <h3 className="font-bold text-lg text-brand-600 mb-1">{qrModalData.title}</h3>
-                    <div className="bg-white border-2 border-brand-500 p-2 rounded-xl mb-4 inline-block"><QRCode value={qrModalData.token} size={150} /></div>
-                    <button onClick={() => window.print()} className="w-full py-2 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-50"><Printer size={16} className="mr-2" /> In Mã</button>
-                </div>
-            </div>
-        )}
+               {/* 5. ACTIONS FOOTER */}
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
+                   <button onClick={() => exportData('logs', 'owner1')} className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
+                       <Download className="mr-2 text-brand-600" size={20}/> Xuất dữ liệu (JSON)
+                   </button>
+                   <button className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
+                       <FileSpreadsheet className="mr-2 text-green-600" size={20}/> Tải Excel
+                   </button>
+                   <button onClick={() => window.print()} className="flex items-center justify-center p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-700 font-bold shadow-sm transition-all">
+                       <Printer className="mr-2 text-gray-600" size={20}/> In Báo Cáo PDF
+                   </button>
+               </div>
+           </div>
+       )}
+
+       {/* Placeholder for other tabs */}
+       {activeTab !== 'dashboard' && (
+           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+               <Settings size={48} className="mb-4 opacity-20"/>
+               <h3 className="text-lg font-bold">Đang phát triển module: {activeTab}</h3>
+               <p>Tính năng này sẽ sớm được cập nhật.</p>
+           </div>
+       )}
     </Layout>
   );
 };
+
 export default OwnerDashboard;

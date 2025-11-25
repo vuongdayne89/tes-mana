@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { UserRole, Ticket } from '../types';
 import { getTicketsByPhone, generateTicketToken, changePin, getSession } from '../services/mockDb';
@@ -9,7 +8,7 @@ import { X, RefreshCw, Settings, Key } from 'lucide-react';
 import QRCode from "react-qr-code";
 
 const CustomerDashboard: React.FC = () => {
-  const history = useHistory();
+  const navigate = useNavigate();
   const [user, setUser] = useState(getSession());
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -22,7 +21,7 @@ const CustomerDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!user || user.role !== UserRole.CUSTOMER) {
-        history.push('/login?role=CUSTOMER');
+        navigate('/login?role=CUSTOMER');
         return;
     }
     const loadTickets = async () => {
@@ -30,7 +29,7 @@ const CustomerDashboard: React.FC = () => {
       setTickets(data);
     };
     loadTickets();
-  }, [user, history]);
+  }, [user, navigate]);
 
   useEffect(() => {
     if (selectedTicket) {

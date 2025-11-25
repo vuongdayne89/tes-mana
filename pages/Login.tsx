@@ -1,12 +1,11 @@
-
 import React, { useState } from 'react';
-import { useHistory, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { login } from '../services/mockDb';
 import { UserRole } from '../types';
 import { ArrowLeft, Lock, KeyRound, Shield } from 'lucide-react';
 
 const Login: React.FC = () => {
-  const history = useHistory();
+  const navigate = useNavigate();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const roleParam = searchParams.get('role') as UserRole || UserRole.CUSTOMER;
@@ -33,10 +32,10 @@ const Login: React.FC = () => {
     const { user, error: loginError } = await login(phone, secret, roleParam);
     
     if (user) {
-      if (user.role === UserRole.CUSTOMER) history.push('/customer');
-      else if (user.role === UserRole.STAFF) history.push('/staff');
-      else if (user.role === UserRole.OWNER) history.push('/owner');
-      else if (user.role === UserRole.PLATFORM_ADMIN) history.push('/super-admin');
+      if (user.role === UserRole.CUSTOMER) navigate('/customer');
+      else if (user.role === UserRole.STAFF) navigate('/staff');
+      else if (user.role === UserRole.OWNER) navigate('/owner');
+      else if (user.role === UserRole.PLATFORM_ADMIN) navigate('/super-admin');
     } else {
       setError(loginError || 'Đăng nhập thất bại.');
     }
@@ -46,7 +45,7 @@ const Login: React.FC = () => {
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <div className="p-4">
-        <button onClick={() => history.push('/')} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full">
+        <button onClick={() => navigate('/')} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full">
           <ArrowLeft />
         </button>
       </div>

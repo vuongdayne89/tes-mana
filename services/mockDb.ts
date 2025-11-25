@@ -13,8 +13,13 @@ const tryParseJSON = (str: string) => {
         const cleaned = str.replace(/^"|"$/g, '').replace(/\\"/g, '"');
         return JSON.parse(cleaned);
     } catch (e) {
+        // Fallback: try to extract ID if it looks like a JSON but failed
         const idMatch = str.match(/"id"\s*:\s*"([^"]+)"/);
         if (idMatch && idMatch[1]) return { id: idMatch[1] };
+        
+        // Fallback 2: Assume string is just ID
+        if (!str.trim().startsWith('{')) return { id: str.trim() };
+        
         return null;
     }
 };
@@ -277,7 +282,11 @@ export const registerCustomer = async (name: string, phone: string, pin: string,
 
     if (isSupabaseConfigured()) {
         const { error } = await supabase.from('users').insert(newUser);
-        if (error) return { success: false, message: `Lỗi DB: ${error.message}` }; 
+        if (error) {
+             // Improve error message from Supabase
+             if (error.code === '23505') return { success: false, message: 'Số điện thoại đã tồn tại' };
+             return { success: false, message: `Lỗi DB: ${error.message}` };
+        }
     } else {
         const db = getLocalDB();
         if (db.users.some(u => u.phone === phone)) return { success: false, message: 'SĐT đã tồn tại' };
@@ -352,7 +361,7 @@ export const createTicket = async (
         ticket_id: `T${Date.now().toString().slice(-6)}`,
         tenant_id: tid,
         shop_id: tid, 
-        branch_id: 'anan1', // Should be dynamic, but keeping simple for now
+        branch_id: 'anan1', // Default, should be selected in UI
         owner_phone: data.owner_phone, owner_name: data.owner_name,
         type: data.type,
         type_label: data.type_label || data.type.toUpperCase(),
@@ -410,7 +419,7 @@ export const getTicketsByPhone = async (phone: string): Promise<Ticket[]> => {
 };
 
 export const generateIdentityToken = (user: User) => {
-    const payload = { "Thẻ": "Thành Viên", "Tên": user.name, "SĐT": user.phone, "type": "identity", "sig": mockHmac(user.phone + HMAC_SECRET) };
+    const payload = { "Thẻ": "Thành Viên", "Khách": user.name, "SĐT": user.phone, "type": "identity", "sig": mockHmac(user.phone + HMAC_SECRET) };
     return JSON.stringify(payload);
 };
 
@@ -476,6 +485,13 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
     let ticketId = identifier;
     const json = tryParseJSON(identifier);
     if (json && json.id) ticketId = json.id;
+    
+    // If simple string, maybe ticket ID directly, or check with regex
+    if (!json) {
+         const idMatch = identifier.match(/T\d+/);
+         if (idMatch) ticketId = idMatch[0];
+    }
+
     let dbTicket: Ticket | undefined;
     if (isSupabaseConfigured()) {
         const { data, error } = await supabase.from('tickets').select('*').eq('ticket_id', ticketId).single();
@@ -486,6 +502,7 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
     }
     if (!dbTicket) return { success: false, message: `Vé không tồn tại (${ticketId})` };
     const session = getSession();
+    // Validate Tenant Ownership
     if (session && session.tenant_id && dbTicket.tenant_id !== session.tenant_id) {
         return { success: false, message: 'Vé này thuộc về hệ thống khác!' };
     }
@@ -593,20 +610,74 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
     }
     return getLocalDB().audit_logs.filter(l => l.tenant_id === tid);
 };
-export const getDashboardStats = async () => {
+
+// --- STATS (Dashboard Level 2) ---
+export const getDashboardStats = async (branchId?: string) => {
     const tid = getTenantId();
+    if (!tid) return { totalCheckins: 0, activeTickets: 0, expiringSoon: 0, todayCheckins: 0, expiredTickets: 0 };
+
     if (isSupabaseConfigured()) {
-        // Mock stats for simplicity
-        return { totalCheckins: 100, activeTickets: 50, expiringSoon: 5, todayCheckins: 10 };
+        const todayStr = new Date().toISOString().slice(0, 10);
+        
+        // 1. Logs Count (Filtered by Tenant & Optional Branch)
+        let logQuery = supabase.from('checkin_logs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid);
+        if (branchId) logQuery = logQuery.eq('branch_id', branchId);
+        const { count: totalCheckins } = await logQuery;
+
+        // 2. Today Logs Count
+        let todayQuery = supabase.from('checkin_logs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('timestamp', todayStr);
+        if (branchId) todayQuery = todayQuery.eq('branch_id', branchId);
+        const { count: todayCheckins } = await todayQuery;
+
+        // 3. Tickets (Active / Expiring / Expired)
+        let ticketQuery = supabase.from('tickets').select('*').eq('tenant_id', tid);
+        if (branchId) ticketQuery = ticketQuery.eq('branch_id', branchId);
+        
+        const { data: allTickets } = await ticketQuery;
+        
+        const activeTickets = allTickets?.filter(t => t.status === 'active' && t.remaining_uses > 0 && new Date(t.expires_at) >= new Date()).length || 0;
+        const expiringSoon = allTickets?.filter(t => t.status === 'active' && t.remaining_uses > 0 && t.remaining_uses <= 3).length || 0;
+        const expiredTickets = allTickets?.filter(t => t.remaining_uses === 0 || new Date(t.expires_at) < new Date()).length || 0;
+
+        return { 
+            totalCheckins: totalCheckins || 0, 
+            activeTickets, 
+            expiringSoon, 
+            todayCheckins: todayCheckins || 0,
+            expiredTickets
+        };
     }
+
+    // Local DB Fallback
     const db = getLocalDB();
-    const myLogs = db.checkin_logs.filter(l => l.tenant_id === tid);
-    const myTickets = db.tickets.filter(t => t.tenant_id === tid);
+    let myLogs = db.checkin_logs.filter(l => l.tenant_id === tid);
+    let myTickets = db.tickets.filter(t => t.tenant_id === tid);
+
+    if (branchId) {
+        myLogs = myLogs.filter(l => l.branch_id === branchId);
+        myTickets = myTickets.filter(t => t.branch_id === branchId);
+    }
+    
+    const today = new Date().toISOString().slice(0, 10);
+
     return {
         totalCheckins: myLogs.length,
-        activeTickets: myTickets.filter(t => t.status === 'active').length,
-        expiringSoon: myTickets.filter(t => t.remaining_uses < 3).length,
-        todayCheckins: myLogs.filter(l => l.timestamp.startsWith(new Date().toISOString().slice(0, 10))).length
+        activeTickets: myTickets.filter(t => t.status === 'active' && t.remaining_uses > 0 && new Date(t.expires_at) >= new Date()).length,
+        expiringSoon: myTickets.filter(t => t.status === 'active' && t.remaining_uses > 0 && t.remaining_uses <= 3).length,
+        expiredTickets: myTickets.filter(t => t.remaining_uses === 0 || new Date(t.expires_at) < new Date()).length,
+        todayCheckins: myLogs.filter(l => l.timestamp.startsWith(today)).length
     };
 };
+
+// --- CHART DATA (Mocked for UI demonstration) ---
+export const getHourlyChartData = async () => {
+    // In a real app, we would aggregate checkin_logs by hour using Supabase RPC
+    return [
+        { name: '6h', v: 5 }, { name: '7h', v: 12 }, { name: '8h', v: 18 },
+        { name: '9h', v: 8 }, { name: '10h', v: 5 }, { name: '11h', v: 3 },
+        { name: '16h', v: 10 }, { name: '17h', v: 25 }, { name: '18h', v: 30 },
+        { name: '19h', v: 22 }, { name: '20h', v: 10 }
+    ];
+};
+
 export const exportData = async (type: 'logs' | 'tickets', performerId: string) => { return { url: '#' }; };
