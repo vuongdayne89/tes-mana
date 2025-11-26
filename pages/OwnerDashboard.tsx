@@ -1,17 +1,18 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, CheckInLog, Branch, User } from '../types';
+import { UserRole, CheckInLog, Branch, User, Ticket, TicketType } from '../types';
 import { 
   getDashboardStats, getHourlyChartData, getCheckInLogs, getBranches, 
-  createBranch, deleteBranch, getStaffUsers, addStaff, removeStaff, updateBrandName
+  createBranch, deleteBranch, getStaffUsers, addStaff, removeStaff, updateBrandName,
+  getAllTickets, createTicket, generateStaticTicketQR, registerCustomer, getSession, getCustomers
 } from '../services/mockDb';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
 } from 'recharts';
 import { 
-  Activity, Users, AlertTriangle, XCircle, Download, FileSpreadsheet, Printer,
-  LayoutDashboard, User as UserIcon, Package, QrCode, MapPin, FileText, Settings, Plus, Trash2, Save
+  Activity, Users, AlertTriangle, XCircle, Trash2, Printer,
+  LayoutDashboard, User as UserIcon, QrCode, MapPin, Settings, Plus, Save, Ticket as TicketIcon, CheckCircle, AlertCircle, X
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
@@ -30,13 +31,18 @@ const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string |
 );
 
 const OwnerDashboard: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [hourlyData, setHourlyData] = useState<any[]>([]);
-  const [recentLogs, setRecentLogs] = useState<CheckInLog[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [staffList, setStaffList] = useState<User[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [customers, setCustomers] = useState<User[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+
+  // Notification State
+  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
   // Form States
   const [newBranchName, setNewBranchName] = useState('');
@@ -47,16 +53,34 @@ const OwnerDashboard: React.FC = () => {
   const [newStaffBranch, setNewStaffBranch] = useState('');
   const [brandNameInput, setBrandNameInput] = useState('');
 
+  // Ticket Creation Form States
+  const [showCreateTicketModal, setShowCreateTicketModal] = useState(false);
+  const [ticketMode, setTicketMode] = useState<'existing' | 'new'>('existing');
+  const [targetPhone, setTargetPhone] = useState('');
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPin, setNewCustPin] = useState('');
+  const [ticketType, setTicketType] = useState<TicketType>(TicketType.SESSION_12);
+  const [customSessions, setCustomSessions] = useState(10);
+  const [qrModalData, setQrModalData] = useState<{token: string, title: string} | null>(null);
+
+  useEffect(() => {
+    const session = getSession();
+    if(session) setCurrentUser(session);
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [selectedBranch]);
 
   useEffect(() => {
       if(activeTab === 'staff') loadStaff();
-      if(activeTab === 'settings') {
-          // In real app, fetch current name. Here we just use input
-      }
+      if(activeTab === 'tickets') loadTickets();
   }, [activeTab]);
+
+  const showNotify = (message: string, type: 'success' | 'error') => {
+      setNotification({ message, type });
+      setTimeout(() => setNotification(null), 3000);
+  };
 
   const loadData = async () => {
     const b = await getBranches();
@@ -65,8 +89,6 @@ const OwnerDashboard: React.FC = () => {
     setStats(s);
     const h = await getHourlyChartData(selectedBranch || undefined);
     setHourlyData(h);
-    const logs = await getCheckInLogs(); 
-    setRecentLogs(logs.slice(0, 10)); 
   };
 
   const loadStaff = async () => {
@@ -74,43 +96,86 @@ const OwnerDashboard: React.FC = () => {
       setStaffList(s);
   };
 
+  const loadTickets = async () => {
+      const t = await getAllTickets();
+      setTickets(t);
+      const c = await getCustomers();
+      setCustomers(c);
+  };
+
   const handleCreateBranch = async (e: React.FormEvent) => {
       e.preventDefault();
       await createBranch(newBranchName, newBranchAddr);
       setNewBranchName(''); setNewBranchAddr('');
       loadData();
-      alert('Đã tạo chi nhánh!');
+      showNotify('Đã tạo chi nhánh mới', 'success');
   };
 
   const handleDeleteBranch = async (id: string) => {
       if(confirm('Xóa chi nhánh này?')) {
           await deleteBranch(id);
           loadData();
+          showNotify('Đã xóa chi nhánh', 'success');
       }
   };
 
   const handleCreateStaff = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!newStaffBranch) return alert('Vui lòng chọn chi nhánh cho nhân viên');
+      if (!newStaffBranch) return showNotify('Vui lòng chọn chi nhánh', 'error');
       await addStaff({ 
           name: newStaffName, phone: newStaffPhone, password: newStaffPass, branch_id: newStaffBranch 
       }, 'owner');
       setNewStaffName(''); setNewStaffPhone(''); 
       loadStaff();
-      alert('Đã thêm nhân viên!');
+      showNotify('Đã thêm nhân viên thành công', 'success');
   };
 
   const handleDeleteStaff = async (id: string) => {
       if(confirm('Xóa nhân viên này?')) {
           await removeStaff(id, 'owner');
           loadStaff();
+          showNotify('Đã xóa nhân viên', 'success');
+      }
+  };
+
+  const handleCreateTicket = async (e: React.FormEvent) => {
+      e.preventDefault();
+      let finalName = newCustName;
+      if (ticketMode === 'new') {
+          const regRes = await registerCustomer(newCustName, targetPhone, newCustPin, currentUser?.id || 'owner');
+          if (!regRes.success && regRes.message !== 'Số điện thoại đã tồn tại') {
+              showNotify('Lỗi: ' + regRes.message, 'error');
+              return;
+          }
+      } else {
+          // If existing, find name from customers list or just use what we have
+          const exist = customers.find(c => c.phone === targetPhone);
+          finalName = exist ? exist.name : 'Khách hàng';
+      }
+
+      const ticketData = {
+          owner_phone: targetPhone, owner_name: finalName, type: ticketType,
+          type_label: ticketType === TicketType.CUSTOM ? `Vé Tùy Chọn (${customSessions} buổi)` : undefined,
+          custom_sessions: ticketType === TicketType.CUSTOM ? customSessions : undefined
+      };
+
+      const newTicket = await createTicket(ticketData, currentUser?.id || 'owner');
+      if (newTicket) {
+          const staticToken = await generateStaticTicketQR(newTicket);
+          setQrModalData({ token: staticToken, title: `VÉ: ${newTicket.owner_name}` });
+          setShowCreateTicketModal(false);
+          setTargetPhone(''); setNewCustName('');
+          loadTickets();
+          showNotify('Tạo vé mới thành công!', 'success');
+      } else {
+          showNotify('Lỗi tạo vé', 'error');
       }
   };
 
   const handleSaveBrand = async () => {
       if(!brandNameInput) return;
       await updateBrandName(brandNameInput);
-      alert('Đã cập nhật tên thương hiệu! Vui lòng đăng nhập lại để thấy thay đổi.');
+      showNotify('Đã cập nhật thương hiệu. Vui lòng đăng nhập lại.', 'success');
   };
 
   const NavTab = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => (
@@ -129,11 +194,20 @@ const OwnerDashboard: React.FC = () => {
   return (
     <Layout role={UserRole.OWNER} title="Quản Lý Thương Hiệu">
        
+       {/* Notification Toast */}
+       {notification && (
+        <div className={`fixed top-4 right-4 z-[100] p-4 rounded-xl shadow-xl flex items-center gap-3 text-white animate-in slide-in-from-top-2 ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+            {notification.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
+            <span className="font-bold">{notification.message}</span>
+        </div>
+       )}
+
        <div className="bg-white border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
            <div className="flex">
                <NavTab id="dashboard" label="Dashboard" icon={<LayoutDashboard size={18}/>} />
                <NavTab id="branches" label="Chi nhánh" icon={<MapPin size={18}/>} />
                <NavTab id="staff" label="Nhân viên" icon={<UserIcon size={18}/>} />
+               <NavTab id="tickets" label="Vé" icon={<TicketIcon size={18}/>} />
                <NavTab id="qr" label="QR Kiosk" icon={<QrCode size={18}/>} />
                <NavTab id="settings" label="Cài đặt" icon={<Settings size={18}/>} />
            </div>
@@ -248,6 +322,51 @@ const OwnerDashboard: React.FC = () => {
            </div>
        )}
 
+       {/* TICKETS TAB */}
+       {activeTab === 'tickets' && (
+           <div className="space-y-4 animate-in fade-in">
+               <div className="flex justify-between items-center">
+                   <h3 className="font-bold text-lg">Quản lý Vé ({tickets.length})</h3>
+                   <button onClick={() => setShowCreateTicketModal(true)} className="px-4 py-2 bg-brand-600 text-white rounded-lg flex items-center font-bold text-sm">
+                       <Plus size={16} className="mr-2"/> Tạo Vé Mới
+                   </button>
+               </div>
+               <div className="bg-white border rounded-xl overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 font-bold text-gray-600">
+                            <tr>
+                                <th className="p-3">Mã Vé</th>
+                                <th className="p-3">Khách Hàng</th>
+                                <th className="p-3">Loại</th>
+                                <th className="p-3">Sử Dụng</th>
+                                <th className="p-3">Hết Hạn</th>
+                                <th className="p-3 text-right">Trạng Thái</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {tickets.map(t => (
+                                <tr key={t.ticket_id} className="hover:bg-gray-50">
+                                    <td className="p-3 font-mono font-bold text-brand-600">{t.ticket_id}</td>
+                                    <td className="p-3">
+                                        <div className="font-bold">{t.owner_name}</div>
+                                        <div className="text-xs text-gray-500">{t.owner_phone}</div>
+                                    </td>
+                                    <td className="p-3">{t.type_label}</td>
+                                    <td className="p-3 font-bold">{t.remaining_uses} / {t.total_uses}</td>
+                                    <td className="p-3">{new Date(t.expires_at).toLocaleDateString()}</td>
+                                    <td className="p-3 text-right">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                            {t.status.toUpperCase()}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+               </div>
+           </div>
+       )}
+
        {/* QR KIOSK TAB */}
        {activeTab === 'qr' && (
            <div className="animate-in fade-in">
@@ -290,6 +409,62 @@ const OwnerDashboard: React.FC = () => {
                    </button>
                </div>
            </div>
+       )}
+
+       {/* CREATE TICKET MODAL (OWNER) */}
+       {showCreateTicketModal && (
+            <div className="absolute inset-0 z-30 bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white p-6 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-xl">{ticketMode === 'new' ? 'Tạo Khách & Vé Mới' : 'Tạo Vé Cho Khách'}</h3>
+                        <button onClick={() => setShowCreateTicketModal(false)} className="p-2 bg-gray-100 rounded-full"><X size={20}/></button>
+                    </div>
+                    <form onSubmit={handleCreateTicket} className="space-y-4">
+                        <div className="flex gap-2 mb-4">
+                            <button type="button" onClick={() => setTicketMode('existing')} className={`flex-1 py-2 border rounded ${ticketMode === 'existing' ? 'bg-brand-50 border-brand-500 text-brand-700 font-bold' : ''}`}>Khách Cũ</button>
+                            <button type="button" onClick={() => setTicketMode('new')} className={`flex-1 py-2 border rounded ${ticketMode === 'new' ? 'bg-brand-50 border-brand-500 text-brand-700 font-bold' : ''}`}>Khách Mới</button>
+                        </div>
+                        
+                        <input type="tel" placeholder="Số điện thoại (*)" required className="w-full p-3 border rounded-lg" value={targetPhone} onChange={e=>setTargetPhone(e.target.value)} />
+                        
+                        {ticketMode === 'new' && (
+                            <div className="space-y-4 animate-in fade-in">
+                                <input type="text" placeholder="Họ tên khách (*)" required className="w-full p-3 border rounded-lg" value={newCustName} onChange={e=>setNewCustName(e.target.value)} />
+                                <input type="text" placeholder="PIN đăng nhập (4 số)" maxLength={4} required className="w-full p-3 border rounded-lg" value={newCustPin} onChange={e=>setNewCustPin(e.target.value)} />
+                            </div>
+                        )}
+
+                        <div className="pt-4 border-t">
+                            <label className="font-bold block mb-2">Loại Vé</label>
+                            <select className="w-full p-3 border rounded-lg mb-2" value={ticketType} onChange={e=>setTicketType(e.target.value as TicketType)}>
+                                <option value={TicketType.SESSION_12}>Gói 12 Buổi</option>
+                                <option value={TicketType.SESSION_20}>Gói 20 Buổi</option>
+                                <option value={TicketType.MONTHLY}>Gói Tháng</option>
+                                <option value={TicketType.CUSTOM}>Tùy Chọn</option>
+                            </select>
+                             {ticketType === TicketType.CUSTOM && (
+                                <input type="number" placeholder="Số buổi" className="w-full p-3 border rounded-lg mb-2" value={customSessions} onChange={e=>setCustomSessions(Number(e.target.value))} />
+                            )}
+                        </div>
+
+                        <button type="submit" className="w-full py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg mt-6">Tạo Vé</button>
+                    </form>
+                </div>
+            </div>
+       )}
+
+       {/* QR MODAL */}
+       {qrModalData && (
+             <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-6">
+                <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center relative">
+                    <button onClick={() => setQrModalData(null)} className="absolute top-2 right-2 p-2"><X/></button>
+                    <h3 className="font-bold text-xl mb-1">{qrModalData.title}</h3>
+                    <div className="bg-white p-2 border-4 border-brand-500 rounded-xl inline-block mb-6 mt-4">
+                        <QRCode value={qrModalData.token} size={200} />
+                    </div>
+                    <button onClick={() => window.print()} className="w-full py-3 bg-gray-100 font-bold rounded-xl flex items-center justify-center"><Printer className="mr-2"/> In Ngay</button>
+                </div>
+             </div>
        )}
 
     </Layout>

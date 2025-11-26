@@ -1,4 +1,3 @@
-
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { Ticket, User, CheckInLog, Branch, UserRole, TicketType, TicketStatus, AuditLog, CustomerDetail, Tenant, Package } from '../types';
 
@@ -119,10 +118,37 @@ export const createPackage = async (pkg: Package) => {
 
 export const getAllTenants = async (): Promise<Tenant[]> => {
     if (isSupabaseConfigured()) {
-        const { data } = await supabase.from('tenants').select('*');
-        return (data as Tenant[]) || [];
+        const { data: tenants } = await supabase.from('tenants').select('*');
+        const result = (tenants as Tenant[]) || [];
+        
+        // Aggregate stats for each tenant
+        for (const t of result) {
+            const { count: branches } = await supabase.from('branches').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id);
+            const { count: staff } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id).eq('role', UserRole.STAFF);
+            const { count: customers } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id).eq('role', UserRole.CUSTOMER);
+            const { count: checkins } = await supabase.from('checkin_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id);
+            
+            t.stats = {
+                branches: branches || 0,
+                staff: staff || 0,
+                customers: customers || 0,
+                checkins: checkins || 0
+            };
+        }
+        return result;
     }
-    return getLocalDB().tenants;
+    
+    // Local DB logic
+    const db = getLocalDB();
+    return db.tenants.map(t => ({
+        ...t,
+        stats: {
+            branches: db.branches.filter(b => b.tenant_id === t.id).length,
+            staff: db.users.filter(u => u.tenant_id === t.id && u.role === UserRole.STAFF).length,
+            customers: db.users.filter(u => u.tenant_id === t.id && u.role === UserRole.CUSTOMER).length,
+            checkins: db.checkin_logs.filter(l => l.tenant_id === t.id).length
+        }
+    }));
 };
 
 export const createTenant = async (name: string, ownerPhone: string, ownerPassword: string, packageId: string) => {
@@ -159,14 +185,36 @@ export const createTenant = async (name: string, ownerPhone: string, ownerPasswo
     return { success: true };
 };
 
-export const updateTenantStatus = async (id: string, status: 'active' | 'locked') => {
+export const adminDeleteTenant = async (id: string) => {
     if (isSupabaseConfigured()) {
-        await supabase.from('tenants').update({ status }).eq('id', id);
+        // Simple cascade delete logic (ideally handled by DB constraints)
+        await supabase.from('checkin_logs').delete().eq('tenant_id', id);
+        await supabase.from('tickets').delete().eq('tenant_id', id);
+        await supabase.from('users').delete().eq('tenant_id', id);
+        await supabase.from('branches').delete().eq('tenant_id', id);
+        await supabase.from('tenants').delete().eq('id', id);
+    } else {
+        const db = getLocalDB();
+        db.tenants = db.tenants.filter(t => t.id !== id);
+        db.users = db.users.filter(u => u.tenant_id !== id);
+        db.tickets = db.tickets.filter(t => t.tenant_id !== id);
+        db.branches = db.branches.filter(b => b.tenant_id !== id);
+        saveLocalDB(db);
+    }
+};
+
+export const adminUpdateTenant = async (id: string, updates: Partial<Tenant>) => {
+    if (isSupabaseConfigured()) {
+        await supabase.from('tenants').update(updates).eq('id', id);
     } else {
         const db = getLocalDB();
         const t = db.tenants.find(x => x.id === id);
-        if (t) { t.status = status; saveLocalDB(db); }
+        if (t) { Object.assign(t, updates); saveLocalDB(db); }
     }
+};
+
+export const updateTenantStatus = async (id: string, status: 'active' | 'locked') => {
+    await adminUpdateTenant(id, { status });
 };
 
 // --- BRAND OWNER SERVICES (Level 2) ---
@@ -283,7 +331,6 @@ export const registerCustomer = async (name: string, phone: string, pin: string,
     if (isSupabaseConfigured()) {
         const { error } = await supabase.from('users').insert(newUser);
         if (error) {
-             // Improve error message from Supabase
              if (error.code === '23505') return { success: false, message: 'Số điện thoại đã tồn tại' };
              return { success: false, message: `Lỗi DB: ${error.message}` };
         }
@@ -361,7 +408,7 @@ export const createTicket = async (
         ticket_id: `T${Date.now().toString().slice(-6)}`,
         tenant_id: tid,
         shop_id: tid, 
-        branch_id: 'anan1', // Default, should be selected in UI
+        branch_id: 'anan1', // Default
         owner_phone: data.owner_phone, owner_name: data.owner_name,
         type: data.type,
         type_label: data.type_label || data.type.toUpperCase(),
@@ -485,8 +532,6 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
     let ticketId = identifier;
     const json = tryParseJSON(identifier);
     if (json && json.id) ticketId = json.id;
-    
-    // If simple string, maybe ticket ID directly, or check with regex
     if (!json) {
          const idMatch = identifier.match(/T\d+/);
          if (idMatch) ticketId = idMatch[0];
@@ -502,7 +547,6 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
     }
     if (!dbTicket) return { success: false, message: `Vé không tồn tại (${ticketId})` };
     const session = getSession();
-    // Validate Tenant Ownership
     if (session && session.tenant_id && dbTicket.tenant_id !== session.tenant_id) {
         return { success: false, message: 'Vé này thuộc về hệ thống khác!' };
     }
@@ -511,13 +555,15 @@ export const previewTicketToken = async (identifier: string): Promise<{ success:
 
 export const performCheckIn = async (
   identifier: string, method: 'QR_CHUNG' | 'QR_RIENG' | 'MANUAL', branchId: string, performedBy?: string, pin?: string 
-): Promise<{ success: boolean; message: string; remaining?: number; requirePin?: boolean }> => {
+): Promise<{ success: boolean; message: string; remaining?: number; requirePin?: boolean; ticketInfo?: any }> => {
   const prev = await previewTicketToken(identifier);
   if (!prev.success || !prev.ticket) return { success: false, message: prev.message };
   const dbTicket = prev.ticket;
+  
   if (dbTicket.remaining_uses <= 0) return { success: false, message: 'Vé đã hết lượt sử dụng' };
   if (new Date(dbTicket.expires_at) < new Date()) return { success: false, message: 'Vé đã hết hạn' };
   if (dbTicket.status === TicketStatus.LOCKED) return { success: false, message: 'Vé đang bị khóa' };
+  
   if (dbTicket.require_pin && method !== 'MANUAL') {
       if (!pin) return { success: false, message: 'Cần nhập PIN', requirePin: true };
       let validPin = false;
@@ -530,7 +576,14 @@ export const performCheckIn = async (
       }
       if (!validPin) return { success: false, message: 'Mã PIN sai' };
   }
+  
   const newRemaining = dbTicket.remaining_uses - 1;
+  const ticketInfo = {
+      type_label: dbTicket.type_label,
+      owner_name: dbTicket.owner_name,
+      remaining: newRemaining
+  };
+
   if (isSupabaseConfigured()) {
       await supabase.from('tickets').update({ remaining_uses: newRemaining }).eq('ticket_id', dbTicket.ticket_id);
       await supabase.from('checkin_logs').insert({
@@ -549,7 +602,7 @@ export const performCheckIn = async (
       });
       saveLocalDB(db);
   }
-  return { success: true, message: 'Check-in Thành Công', remaining: newRemaining };
+  return { success: true, message: 'Check-in Thành Công', remaining: newRemaining, ticketInfo };
 };
 
 export const updateTicket = async (ticketId: string, data: Partial<Ticket>, ownerId: string) => {
@@ -574,8 +627,6 @@ export const getStaffUsers = async (): Promise<User[]> => {
     const tid = getTenantId();
     if (!tid) return [];
     if (isSupabaseConfigured()) {
-        // Need to join branches to get branch name, or do a second query.
-        // For simplicity, we fetch all branches of tenant and map.
         const { data: users } = await supabase.from('users').select('*').eq('role', UserRole.STAFF).eq('tenant_id', tid);
         return (users as User[]) || [];
     }
@@ -596,23 +647,43 @@ export const removeStaff = async (staffId: string, performerId: string) => {
     if (isSupabaseConfigured()) { await supabase.from('users').delete().eq('id', staffId); }
     else { const db = getLocalDB(); db.users = db.users.filter(u => u.id !== staffId); saveLocalDB(db); }
 };
-export const getCheckInLogs = async (): Promise<CheckInLog[]> => {
+export const getCheckInLogs = async (branchId?: string, dateStr?: string): Promise<CheckInLog[]> => {
     const tid = getTenantId();
     if (!tid) return [];
+    
     if (isSupabaseConfigured()) {
-        const { data } = await supabase.from('checkin_logs').select('*').eq('tenant_id', tid).order('timestamp', { ascending: false }).limit(50);
+        let query = supabase.from('checkin_logs').select('*').eq('tenant_id', tid).order('timestamp', { ascending: false }).limit(50);
+        if (branchId) query = query.eq('branch_id', branchId);
+        if (dateStr) {
+             const nextDay = new Date(dateStr);
+             nextDay.setDate(nextDay.getDate() + 1);
+             query = query.gte('timestamp', dateStr).lt('timestamp', nextDay.toISOString().split('T')[0]);
+        }
+        const { data } = await query;
         return (data as CheckInLog[]) || [];
     }
-    return getLocalDB().checkin_logs.filter(l => l.tenant_id === tid);
+    
+    let logs = getLocalDB().checkin_logs.filter(l => l.tenant_id === tid);
+    if (branchId) logs = logs.filter(l => l.branch_id === branchId);
+    if (dateStr) logs = logs.filter(l => l.timestamp.startsWith(dateStr));
+    return logs;
 };
 export const getAuditLogs = async (): Promise<AuditLog[]> => {
-    const tid = getTenantId();
-    if (!tid) return [];
+    const session = getSession();
+    if (!session) return [];
+    
+    // Platform Admin sees everything, Tenant Owner sees only their own
     if (isSupabaseConfigured()) {
-        const { data } = await supabase.from('audit_logs').select('*').eq('tenant_id', tid).order('timestamp', { ascending: false }).limit(50);
+        let query = supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(100);
+        if (session.role !== UserRole.PLATFORM_ADMIN) {
+             query = query.eq('tenant_id', session.tenant_id);
+        }
+        const { data } = await query;
         return (data as AuditLog[]) || [];
     }
-    return getLocalDB().audit_logs.filter(l => l.tenant_id === tid);
+    const db = getLocalDB();
+    if (session.role === UserRole.PLATFORM_ADMIN) return db.audit_logs;
+    return db.audit_logs.filter(l => l.tenant_id === session.tenant_id);
 };
 
 // --- STATS (Dashboard Level 2) ---
@@ -623,17 +694,14 @@ export const getDashboardStats = async (branchId?: string) => {
     if (isSupabaseConfigured()) {
         const todayStr = new Date().toISOString().slice(0, 10);
         
-        // 1. Logs Count (Filtered by Tenant & Optional Branch)
         let logQuery = supabase.from('checkin_logs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid);
         if (branchId) logQuery = logQuery.eq('branch_id', branchId);
         const { count: totalCheckins } = await logQuery;
 
-        // 2. Today Logs Count
         let todayQuery = supabase.from('checkin_logs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('timestamp', todayStr);
         if (branchId) todayQuery = todayQuery.eq('branch_id', branchId);
         const { count: todayCheckins } = await todayQuery;
 
-        // 3. Tickets (Active / Expiring / Expired)
         let ticketQuery = supabase.from('tickets').select('*').eq('tenant_id', tid);
         if (branchId) ticketQuery = ticketQuery.eq('branch_id', branchId);
         
@@ -652,7 +720,6 @@ export const getDashboardStats = async (branchId?: string) => {
         };
     }
 
-    // Local DB Fallback
     const db = getLocalDB();
     let myLogs = db.checkin_logs.filter(l => l.tenant_id === tid);
     let myTickets = db.tickets.filter(t => t.tenant_id === tid);
@@ -706,3 +773,24 @@ export const getHourlyChartData = async (branchId?: string) => {
 };
 
 export const exportData = async (type: 'logs' | 'tickets', performerId: string) => { return { url: '#' }; };
+
+export const getMyHistory = async (phone: string): Promise<CheckInLog[]> => {
+    const tid = getTenantId();
+    if (!tid) return [];
+
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase.from('checkin_logs')
+            .select('*')
+            .eq('user_phone', phone)
+            .eq('tenant_id', tid)
+            .order('timestamp', { ascending: false })
+            .limit(20);
+        return (data as CheckInLog[]) || [];
+    } else {
+        const db = getLocalDB();
+        return db.checkin_logs
+            .filter(l => l.user_phone === phone && l.tenant_id === tid)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .slice(0, 20);
+    }
+};

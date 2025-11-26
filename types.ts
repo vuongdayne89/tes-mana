@@ -35,6 +35,13 @@ export interface Tenant {
   status: 'active' | 'locked';
   subscription_end: string;
   created_at: string;
+  // Stats fields (populated dynamically)
+  stats?: {
+    branches: number;
+    staff: number;
+    customers: number;
+    checkins: number;
+  };
 }
 
 export interface Ticket {

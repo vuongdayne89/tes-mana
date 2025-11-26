@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { UserRole, Ticket } from '../types';
-import { getTicketsByPhone, generateTicketToken, changePin, getSession } from '../services/mockDb';
+import { UserRole, Ticket, CheckInLog } from '../types';
+import { getTicketsByPhone, generateTicketToken, changePin, getSession, getMyHistory } from '../services/mockDb';
 import TicketCard from '../components/TicketCard';
-import { X, RefreshCw, Settings, Key } from 'lucide-react';
+import { X, RefreshCw, Settings, Key, Clock, Calendar } from 'lucide-react';
 import QRCode from "react-qr-code";
 
 const CustomerDashboard: React.FC = () => {
@@ -14,6 +15,8 @@ const CustomerDashboard: React.FC = () => {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [qrToken, setQrToken] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLogs, setHistoryLogs] = useState<CheckInLog[]>([]);
   
   const [oldPin, setOldPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -41,6 +44,14 @@ const CustomerDashboard: React.FC = () => {
     }
   }, [selectedTicket]);
 
+  const handleShowHistory = async () => {
+      if(user) {
+          const logs = await getMyHistory(user.phone);
+          setHistoryLogs(logs);
+          setShowHistory(true);
+      }
+  };
+
   const handleChangePin = async (e: React.FormEvent) => {
       e.preventDefault();
       setPinMsg('');
@@ -63,7 +74,10 @@ const CustomerDashboard: React.FC = () => {
   return (
     <Layout role={UserRole.CUSTOMER} title="Vé Của Tôi">
       <div className="space-y-6 relative">
-        <div className="absolute top-0 right-0 -mt-12 mr-4">
+        <div className="absolute top-0 right-0 -mt-12 mr-4 flex gap-2">
+             <button onClick={handleShowHistory} className="text-white p-2 hover:bg-brand-700 rounded-full" title="Lịch sử">
+                 <Clock size={20} />
+             </button>
              <button onClick={() => setShowSettings(true)} className="text-white p-2 hover:bg-brand-700 rounded-full" title="Cài đặt">
                  <Settings size={20} />
              </button>
@@ -127,6 +141,7 @@ const CustomerDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* SETTINGS MODAL */}
       {showSettings && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
              <div className="bg-white rounded-2xl w-full max-w-xs p-6 relative animate-in fade-in zoom-in-95">
@@ -148,6 +163,34 @@ const CustomerDashboard: React.FC = () => {
                     <button type="submit" className="w-full bg-brand-600 text-white py-2 rounded font-bold">Cập nhật PIN</button>
                     {pinMsg && <p className="text-center text-sm font-medium text-brand-600">{pinMsg}</p>}
                 </form>
+             </div>
+          </div>
+      )}
+
+      {/* HISTORY MODAL */}
+      {showHistory && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+             <div className="bg-white rounded-2xl w-full max-w-md p-6 relative animate-in fade-in zoom-in-95 max-h-[80vh] overflow-hidden flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg flex items-center"><Clock className="mr-2" size={20} /> Lịch sử sử dụng</h3>
+                    <button onClick={() => setShowHistory(false)}><X size={20} className="text-gray-400" /></button>
+                </div>
+                
+                <div className="overflow-y-auto flex-1 space-y-3">
+                    {historyLogs.length === 0 && <p className="text-center text-gray-500 py-4">Chưa có lịch sử.</p>}
+                    {historyLogs.map(log => (
+                        <div key={log.id} className="p-3 border rounded-lg hover:bg-gray-50 bg-gray-50/50">
+                            <div className="flex justify-between items-center mb-1">
+                                <span className="font-bold text-brand-700">{log.ticket_id}</span>
+                                <span className="text-xs text-gray-500 flex items-center"><Calendar size={12} className="mr-1"/> {new Date(log.timestamp).toLocaleDateString('vi-VN')}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">{new Date(log.timestamp).toLocaleTimeString('vi-VN')}</span>
+                                <span className="font-medium">{log.branch_id}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
              </div>
           </div>
       )}
