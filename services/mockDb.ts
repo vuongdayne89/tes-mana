@@ -187,7 +187,6 @@ export const createTenant = async (name: string, ownerPhone: string, ownerPasswo
 
 export const adminDeleteTenant = async (id: string) => {
     if (isSupabaseConfigured()) {
-        // Simple cascade delete logic (ideally handled by DB constraints)
         await supabase.from('checkin_logs').delete().eq('tenant_id', id);
         await supabase.from('tickets').delete().eq('tenant_id', id);
         await supabase.from('users').delete().eq('tenant_id', id);
@@ -647,27 +646,66 @@ export const removeStaff = async (staffId: string, performerId: string) => {
     if (isSupabaseConfigured()) { await supabase.from('users').delete().eq('id', staffId); }
     else { const db = getLocalDB(); db.users = db.users.filter(u => u.id !== staffId); saveLocalDB(db); }
 };
-export const getCheckInLogs = async (branchId?: string, dateStr?: string): Promise<CheckInLog[]> => {
+// --- UPDATED GET CHECKIN LOGS ---
+export const getCheckInLogs = async (branchId?: string, startDate?: string, endDate?: string): Promise<(CheckInLog & { ticket_type?: string, branch_name?: string, staff_name?: string })[]> => {
     const tid = getTenantId();
     if (!tid) return [];
     
+    let logs: any[] = [];
+
     if (isSupabaseConfigured()) {
-        let query = supabase.from('checkin_logs').select('*').eq('tenant_id', tid).order('timestamp', { ascending: false }).limit(50);
+        // Fetch logs with ticket and branch info via relation or just fetch and join manually if relation isn't easy
+        // Assuming simple structure, we select * and we'll join manually or rely on 'ticket_id' and 'branch_id'
+        let query = supabase.from('checkin_logs').select('*, tickets(type_label, type), branches(name)').eq('tenant_id', tid).order('timestamp', { ascending: false });
+        
         if (branchId) query = query.eq('branch_id', branchId);
-        if (dateStr) {
-             const nextDay = new Date(dateStr);
-             nextDay.setDate(nextDay.getDate() + 1);
-             query = query.gte('timestamp', dateStr).lt('timestamp', nextDay.toISOString().split('T')[0]);
+        
+        if (startDate) {
+            query = query.gte('timestamp', startDate);
         }
+        
+        if (endDate) {
+             const end = new Date(endDate);
+             end.setHours(23, 59, 59, 999);
+             query = query.lte('timestamp', end.toISOString());
+        } else {
+             // If no date range, limit to last 100
+             if(!startDate) query = query.limit(100);
+        }
+
         const { data } = await query;
-        return (data as CheckInLog[]) || [];
+        if (data) logs = data;
+    } else {
+        const db = getLocalDB();
+        logs = db.checkin_logs.filter(l => l.tenant_id === tid);
+        if (branchId) logs = logs.filter(l => l.branch_id === branchId);
+        if (startDate) logs = logs.filter(l => l.timestamp >= startDate);
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            logs = logs.filter(l => l.timestamp <= end.toISOString());
+        }
+        // Manual join for local
+        logs = logs.map(l => {
+            const t = db.tickets.find(tk => tk.ticket_id === l.ticket_id);
+            const b = db.branches.find(br => br.id === l.branch_id);
+            return {
+                ...l,
+                tickets: { type_label: t?.type_label || t?.type },
+                branches: { name: b?.name }
+            };
+        }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     }
-    
-    let logs = getLocalDB().checkin_logs.filter(l => l.tenant_id === tid);
-    if (branchId) logs = logs.filter(l => l.branch_id === branchId);
-    if (dateStr) logs = logs.filter(l => l.timestamp.startsWith(dateStr));
-    return logs;
+
+    // Flatten structure for UI
+    return logs.map(l => ({
+        ...l,
+        ticket_type: l.tickets?.type_label || l.tickets?.type || 'N/A',
+        branch_name: l.branches?.name || l.branch_id,
+        staff_name: l.is_manual_by_staff ? 'Nhân viên' : 'Hệ thống'
+    }));
 };
+
 export const getAuditLogs = async (): Promise<AuditLog[]> => {
     const session = getSession();
     if (!session) return [];

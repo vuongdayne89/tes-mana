@@ -5,14 +5,14 @@ import { UserRole, CheckInLog, Branch, User, Ticket, TicketType } from '../types
 import { 
   getDashboardStats, getHourlyChartData, getCheckInLogs, getBranches, 
   createBranch, deleteBranch, getStaffUsers, addStaff, removeStaff, updateBrandName,
-  getAllTickets, createTicket, generateStaticTicketQR, registerCustomer, getSession, getCustomers
+  getAllTickets, createTicket, generateStaticTicketQR, registerCustomer, getSession, getCustomers, deleteTicket
 } from '../services/mockDb';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
 } from 'recharts';
 import { 
   Activity, Users, AlertTriangle, XCircle, Trash2, Printer,
-  LayoutDashboard, User as UserIcon, QrCode, MapPin, Settings, Plus, Save, Ticket as TicketIcon, CheckCircle, AlertCircle, X
+  LayoutDashboard, User as UserIcon, QrCode, MapPin, Settings, Plus, Save, Ticket as TicketIcon, CheckCircle, AlertCircle, X, Search, Filter, Download
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
@@ -40,6 +40,12 @@ const OwnerDashboard: React.FC = () => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [customers, setCustomers] = useState<User[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+
+  // Logs Filter States
+  const [logs, setLogs] = useState<(CheckInLog & { ticket_type?: string, branch_name?: string, staff_name?: string })[]>([]);
+  const [filterLogBranch, setFilterLogBranch] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
 
   // Notification State
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
@@ -75,6 +81,7 @@ const OwnerDashboard: React.FC = () => {
   useEffect(() => {
       if(activeTab === 'staff') loadStaff();
       if(activeTab === 'tickets') loadTickets();
+      if(activeTab === 'logs') loadLogs();
   }, [activeTab]);
 
   const showNotify = (message: string, type: 'success' | 'error') => {
@@ -102,6 +109,16 @@ const OwnerDashboard: React.FC = () => {
       const c = await getCustomers();
       setCustomers(c);
   };
+
+  const loadLogs = async () => {
+      const l = await getCheckInLogs(filterLogBranch, filterStartDate, filterEndDate);
+      setLogs(l);
+  };
+
+  // Re-load logs when filters change
+  useEffect(() => {
+    if (activeTab === 'logs') loadLogs();
+  }, [filterLogBranch, filterStartDate, filterEndDate]);
 
   const handleCreateBranch = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -172,6 +189,14 @@ const OwnerDashboard: React.FC = () => {
       }
   };
 
+  const handleDeleteTicket = async (id: string) => {
+      if(confirm('Bạn có chắc muốn xóa vé này? Hành động này không thể hoàn tác.')) {
+          await deleteTicket(id);
+          loadTickets();
+          showNotify('Đã xóa vé', 'success');
+      }
+  }
+
   const handleSaveBrand = async () => {
       if(!brandNameInput) return;
       await updateBrandName(brandNameInput);
@@ -208,6 +233,7 @@ const OwnerDashboard: React.FC = () => {
                <NavTab id="branches" label="Chi nhánh" icon={<MapPin size={18}/>} />
                <NavTab id="staff" label="Nhân viên" icon={<UserIcon size={18}/>} />
                <NavTab id="tickets" label="Vé" icon={<TicketIcon size={18}/>} />
+               <NavTab id="logs" label="Báo Cáo" icon={<CheckCircle size={18}/>} />
                <NavTab id="qr" label="QR Kiosk" icon={<QrCode size={18}/>} />
                <NavTab id="settings" label="Cài đặt" icon={<Settings size={18}/>} />
            </div>
@@ -340,7 +366,7 @@ const OwnerDashboard: React.FC = () => {
                                 <th className="p-3">Loại</th>
                                 <th className="p-3">Sử Dụng</th>
                                 <th className="p-3">Hết Hạn</th>
-                                <th className="p-3 text-right">Trạng Thái</th>
+                                <th className="p-3 text-right">Hành Động</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -355,15 +381,86 @@ const OwnerDashboard: React.FC = () => {
                                     <td className="p-3 font-bold">{t.remaining_uses} / {t.total_uses}</td>
                                     <td className="p-3">{new Date(t.expires_at).toLocaleDateString()}</td>
                                     <td className="p-3 text-right">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                            {t.status.toUpperCase()}
-                                        </span>
+                                         <button onClick={() => handleDeleteTicket(t.ticket_id)} className="text-red-500 p-1 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                </div>
+           </div>
+       )}
+
+       {/* LOGS TAB (REPORT) */}
+       {activeTab === 'logs' && (
+           <div className="space-y-4 animate-in fade-in">
+                <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-4 bg-white p-4 rounded-xl border shadow-sm">
+                    <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase">Chi nhánh</label>
+                            <select 
+                                className="w-full p-2 border rounded-lg mt-1"
+                                value={filterLogBranch}
+                                onChange={e => setFilterLogBranch(e.target.value)}
+                            >
+                                <option value="">Tất cả</option>
+                                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                             <label className="text-xs font-bold text-gray-500 uppercase">Từ ngày</label>
+                             <input type="date" className="w-full p-2 border rounded-lg mt-1" value={filterStartDate} onChange={e=>setFilterStartDate(e.target.value)} />
+                        </div>
+                        <div>
+                             <label className="text-xs font-bold text-gray-500 uppercase">Đến ngày</label>
+                             <input type="date" className="w-full p-2 border rounded-lg mt-1" value={filterEndDate} onChange={e=>setFilterEndDate(e.target.value)} />
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={loadLogs} className="px-4 py-2 bg-brand-600 text-white font-bold rounded-lg flex items-center"><Filter size={16} className="mr-2"/> Lọc</button>
+                    </div>
+                </div>
+
+                <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 font-bold text-gray-600 uppercase text-xs">
+                            <tr>
+                                <th className="p-3">Thời gian</th>
+                                <th className="p-3">Khách hàng</th>
+                                <th className="p-3">Loại Vé</th>
+                                <th className="p-3">Chi Nhánh</th>
+                                <th className="p-3">Hình thức</th>
+                                <th className="p-3">Nhân viên</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {logs.length === 0 && (
+                                <tr><td colSpan={6} className="p-8 text-center text-gray-400">Không có dữ liệu check-in nào.</td></tr>
+                            )}
+                            {logs.map(l => (
+                                <tr key={l.id} className="hover:bg-gray-50">
+                                    <td className="p-3">
+                                        <div className="font-bold">{new Date(l.timestamp).toLocaleDateString('vi-VN')}</div>
+                                        <div className="text-xs text-gray-500">{new Date(l.timestamp).toLocaleTimeString('vi-VN')}</div>
+                                    </td>
+                                    <td className="p-3 font-medium">{l.user_name}</td>
+                                    <td className="p-3 text-gray-600">{l.ticket_type}</td>
+                                    <td className="p-3">{l.branch_name}</td>
+                                    <td className="p-3">
+                                        <span className={`px-2 py-1 rounded-full text-xs font-bold border ${
+                                            l.method === 'MANUAL' ? 'bg-orange-50 text-orange-600 border-orange-100' : 
+                                            l.method === 'QR_RIENG' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
+                                            'bg-green-50 text-green-600 border-green-100'
+                                        }`}>
+                                            {l.method}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 text-gray-500">{l.staff_name}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
            </div>
        )}
 
