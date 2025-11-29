@@ -35,6 +35,8 @@ export interface Tenant {
   status: 'active' | 'locked';
   subscription_end: string;
   created_at: string;
+  city?: string;
+  address_detail?: string;
   // Stats fields (populated dynamically)
   stats?: {
     branches: number;
@@ -42,6 +44,15 @@ export interface Tenant {
     customers: number;
     checkins: number;
   };
+}
+
+export interface PlatformStats {
+    mrr: number;
+    totalTenants: number;
+    totalMembers: number;
+    totalCheckins: number;
+    churnRate: number; // percentage
+    topRegions: { name: string, value: number }[];
 }
 
 export interface Ticket {
@@ -105,6 +116,8 @@ export interface Branch {
   tenant_id: string;
   name: string;
   address: string;
+  city?: string;
+  address_detail?: string;
 }
 
 export interface CustomerDetail {

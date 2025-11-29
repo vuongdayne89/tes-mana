@@ -1,15 +1,17 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { UserRole, Tenant, Package, AuditLog } from '../types';
-import { getAllTenants, createTenant, updateTenantStatus, getPackages, createPackage, getAuditLogs, adminDeleteTenant, adminUpdateTenant } from '../services/mockDb';
-import { Building, Plus, Lock, Unlock, Package as BoxIcon, Edit, Trash2, Save, FileText, CreditCard } from 'lucide-react';
+import { UserRole, Tenant, Package, AuditLog, PlatformStats } from '../types';
+import { getAllTenants, createTenant, updateTenantStatus, getPackages, createPackage, getAuditLogs, adminDeleteTenant, adminUpdateTenant, getPlatformStats } from '../services/mockDb';
+import { Building, Plus, Lock, Unlock, Package as BoxIcon, Edit, Trash2, Save, FileText, CreditCard, LayoutDashboard } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { VIETNAM_PROVINCES } from '../services/vietnamProvinces';
 
 const SuperAdminDashboard: React.FC = () => {
-    const [view, setView] = useState<'brands' | 'packages' | 'billing' | 'logs'>('brands');
+    const [view, setView] = useState<'overview' | 'brands' | 'packages' | 'billing'>('overview');
     const [tenants, setTenants] = useState<Tenant[]>([]);
     const [packages, setPackages] = useState<Package[]>([]);
-    const [logs, setLogs] = useState<AuditLog[]>([]);
+    const [stats, setStats] = useState<PlatformStats | null>(null);
     
     // Modal States
     const [showBrandModal, setShowBrandModal] = useState(false);
@@ -22,6 +24,8 @@ const SuperAdminDashboard: React.FC = () => {
     const [newPhone, setNewPhone] = useState('');
     const [newPass, setNewPass] = useState('admin123');
     const [selectedPkg, setSelectedPkg] = useState('');
+    const [selectedCity, setSelectedCity] = useState(VIETNAM_PROVINCES[0]);
+    const [newAddress, setNewAddress] = useState('');
 
     // Package Form
     const [pkgName, setPkgName] = useState('');
@@ -37,16 +41,16 @@ const SuperAdminDashboard: React.FC = () => {
         const t = await getAllTenants();
         setTenants(t);
         getPackages().then(setPackages);
-        getAuditLogs().then(setLogs);
+        getPlatformStats().then(setStats);
     };
 
     const handleCreateBrand = async (e: React.FormEvent) => {
         e.preventDefault();
-        const res = await createTenant(newName, newPhone, newPass, selectedPkg);
+        const res = await createTenant(newName, newPhone, newPass, selectedPkg, selectedCity, newAddress);
         if (res.success) {
             setShowBrandModal(false);
             loadData();
-            setNewName(''); setNewPhone('');
+            setNewName(''); setNewPhone(''); setNewAddress('');
             alert('Tạo thương hiệu thành công!');
         } else {
             alert('Lỗi: ' + res.message);
@@ -94,6 +98,9 @@ const SuperAdminDashboard: React.FC = () => {
         <Layout role={UserRole.PLATFORM_ADMIN} title="ONIN Platform Management">
             {/* Navigation Tabs */}
             <div className="flex space-x-1 mb-6 border-b border-gray-200 overflow-x-auto">
+                <button onClick={() => setView('overview')} className={`px-6 py-3 font-bold flex items-center whitespace-nowrap ${view === 'overview' ? 'text-brand-600 border-b-2 border-brand-600 bg-brand-50' : 'text-gray-500 hover:bg-gray-50'}`}>
+                    <LayoutDashboard size={18} className="mr-2"/> Tổng Quan
+                </button>
                 <button onClick={() => setView('brands')} className={`px-6 py-3 font-bold flex items-center whitespace-nowrap ${view === 'brands' ? 'text-brand-600 border-b-2 border-brand-600 bg-brand-50' : 'text-gray-500 hover:bg-gray-50'}`}>
                     <Building size={18} className="mr-2"/> Cơ sở
                 </button>
@@ -103,10 +110,57 @@ const SuperAdminDashboard: React.FC = () => {
                 <button onClick={() => setView('billing')} className={`px-6 py-3 font-bold flex items-center whitespace-nowrap ${view === 'billing' ? 'text-brand-600 border-b-2 border-brand-600 bg-brand-50' : 'text-gray-500 hover:bg-gray-50'}`}>
                     <CreditCard size={18} className="mr-2"/> Billing
                 </button>
-                <button onClick={() => setView('logs')} className={`px-6 py-3 font-bold flex items-center whitespace-nowrap ${view === 'logs' ? 'text-brand-600 border-b-2 border-brand-600 bg-brand-50' : 'text-gray-500 hover:bg-gray-50'}`}>
-                    <FileText size={18} className="mr-2"/> Logs
-                </button>
             </div>
+
+            {/* OVERVIEW TAB */}
+            {view === 'overview' && stats && (
+                <div className="animate-in fade-in space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="text-gray-500 text-sm font-bold uppercase mb-2">MRR (Doanh thu tháng)</h3>
+                            <div className="text-3xl font-extrabold text-brand-600">{stats.mrr.toLocaleString()}đ</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="text-gray-500 text-sm font-bold uppercase mb-2">Tổng Cơ Sở</h3>
+                            <div className="text-3xl font-extrabold text-blue-600">{stats.totalTenants}</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="text-gray-500 text-sm font-bold uppercase mb-2">Tổng Hội Viên</h3>
+                            <div className="text-3xl font-extrabold text-purple-600">{stats.totalMembers}</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="text-gray-500 text-sm font-bold uppercase mb-2">Tổng Check-in</h3>
+                            <div className="text-3xl font-extrabold text-orange-600">{stats.totalCheckins}</div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Phân bổ theo khu vực (Top 5)</h3>
+                            <div className="h-80 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={stats.topRegions} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                        <XAxis type="number" />
+                                        <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
+                                        <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px' }} />
+                                        <Bar dataKey="value" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={20} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Tỷ lệ Churn Rate</h3>
+                            <div className="flex items-center justify-center h-64">
+                                <div className="text-center">
+                                    <div className="text-5xl font-extrabold text-gray-300">{stats.churnRate}%</div>
+                                    <p className="text-gray-400 mt-2">Tỷ lệ rời bỏ (Tháng này)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* BRANDS TAB (Detailed Table) */}
             {view === 'brands' && (
@@ -121,6 +175,7 @@ const SuperAdminDashboard: React.FC = () => {
                             <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-xs">
                                 <tr>
                                     <th className="p-4">Tên Cơ Sở</th>
+                                    <th className="p-4">Khu vực</th>
                                     <th className="p-4 text-center">Chi nhánh</th>
                                     <th className="p-4">Gói</th>
                                     <th className="p-4 text-center">Nhân viên</th>
@@ -150,10 +205,14 @@ const SuperAdminDashboard: React.FC = () => {
                                                 ) : (
                                                     <div className="flex items-center">
                                                         <Building className="text-gray-300 mr-3" size={20}/>
-                                                        {t.name}
+                                                        <div>
+                                                            <div>{t.name}</div>
+                                                            <div className="text-xs text-gray-400">{t.address_detail}</div>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </td>
+                                            <td className="p-4 text-gray-600">{t.city}</td>
                                             <td className="p-4 text-center font-bold text-gray-600">{t.stats?.branches || 0}</td>
                                             <td className="p-4">
                                                 <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-100">
@@ -249,22 +308,6 @@ const SuperAdminDashboard: React.FC = () => {
                 </div>
             )}
 
-             {/* LOGS TAB */}
-             {view === 'logs' && (
-                <div className="animate-in fade-in">
-                    <h2 className="text-xl font-bold mb-4">Nhật Ký Hệ Thống</h2>
-                    <div className="bg-black text-green-400 p-4 rounded-xl font-mono text-xs h-[500px] overflow-y-auto">
-                        {logs.map(l => (
-                            <div key={l.id} className="mb-2 border-b border-gray-800 pb-1">
-                                <span className="text-gray-500">[{new Date(l.timestamp).toLocaleString()}]</span>{' '}
-                                <span className="text-yellow-500">{l.action}</span>{' '}
-                                <span className="text-blue-400">@{l.tenant_id}</span> : {l.details}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
             {/* Modals */}
             {showBrandModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -274,6 +317,18 @@ const SuperAdminDashboard: React.FC = () => {
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">Tên Cơ Sở</label>
                                 <input className="w-full p-2 border rounded" placeholder="VD: Yoga Center X" value={newName} onChange={e=>setNewName(e.target.value)} required />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Tỉnh / Thành</label>
+                                    <select className="w-full p-2 border rounded" value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}>
+                                        {VIETNAM_PROVINCES.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Chi tiết</label>
+                                    <input className="w-full p-2 border rounded" placeholder="Số nhà, đường..." value={newAddress} onChange={e=>setNewAddress(e.target.value)} required />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">SĐT Chủ Sở Hữu (Login)</label>

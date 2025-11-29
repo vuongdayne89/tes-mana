@@ -8,24 +8,25 @@ import {
   getAllTickets, createTicket, generateStaticTicketQR, registerCustomer, getSession, getCustomers, deleteTicket
 } from '../services/mockDb';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
+  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from 'recharts';
 import { 
-  Activity, Users, AlertTriangle, XCircle, Trash2, Printer,
-  LayoutDashboard, User as UserIcon, QrCode, MapPin, Settings, Plus, Save, Ticket as TicketIcon, CheckCircle, AlertCircle, X, Search, Filter, Download
+  Activity, Users, DollarSign, Repeat, Trash2, Printer,
+  LayoutDashboard, User as UserIcon, QrCode, MapPin, Settings, Plus, Save, Ticket as TicketIcon, CheckCircle, AlertCircle, X, Filter, TrendingUp
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
-const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string | number, color: string }> = ({ icon, label, value, color }) => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between h-full hover:shadow-md transition-shadow">
-        <div className="flex justify-between items-start mb-4">
-             <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-${color.replace('bg-', '')}`}>
-                {icon}
-            </div>
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+
+const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string | number, sub?: string, color: string }> = ({ icon, label, value, sub, color }) => (
+    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between h-full hover:shadow-md transition-shadow relative overflow-hidden">
+        <div className={`absolute top-0 right-0 p-4 opacity-10 text-${color.replace('text-', '')}`}>
+            {icon}
         </div>
         <div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-1">{value}</h3>
-            <p className="text-gray-500 text-sm font-medium uppercase tracking-wide">{label}</p>
+            <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
+            <h3 className={`text-2xl font-extrabold ${color}`}>{value}</h3>
+            {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
         </div>
     </div>
 );
@@ -122,7 +123,7 @@ const OwnerDashboard: React.FC = () => {
 
   const handleCreateBranch = async (e: React.FormEvent) => {
       e.preventDefault();
-      await createBranch(newBranchName, newBranchAddr);
+      await createBranch(newBranchName, newBranchAddr, 'Hồ Chí Minh');
       setNewBranchName(''); setNewBranchAddr('');
       loadData();
       showNotify('Đã tạo chi nhánh mới', 'success');
@@ -165,7 +166,6 @@ const OwnerDashboard: React.FC = () => {
               return;
           }
       } else {
-          // If existing, find name from customers list or just use what we have
           const exist = customers.find(c => c.phone === targetPhone);
           finalName = exist ? exist.name : 'Khách hàng';
       }
@@ -218,8 +218,6 @@ const OwnerDashboard: React.FC = () => {
 
   return (
     <Layout role={UserRole.OWNER} title="Quản Lý Thương Hiệu">
-       
-       {/* Notification Toast */}
        {notification && (
         <div className={`fixed top-4 right-4 z-[100] p-4 rounded-xl shadow-xl flex items-center gap-3 text-white animate-in slide-in-from-top-2 ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
             {notification.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
@@ -239,44 +237,120 @@ const OwnerDashboard: React.FC = () => {
            </div>
        </div>
 
-       {/* DASHBOARD TAB */}
+       {/* DASHBOARD - CHAIN MANAGEMENT VIEW */}
        {activeTab === 'dashboard' && (
            <div className="space-y-6 animate-in fade-in">
-               <div className="flex justify-end">
+               <div className="flex justify-between items-center">
+                   <h2 className="text-xl font-bold text-gray-800">Tổng Quan Chuỗi</h2>
                    <select 
                     className="p-2 border rounded-lg bg-white text-sm shadow-sm"
                     value={selectedBranch}
                     onChange={e => setSelectedBranch(e.target.value)}
                    >
-                       <option value="">Tất cả chi nhánh</option>
+                       <option value="">Toàn bộ hệ thống</option>
                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                    </select>
                </div>
 
+               {/* KEY METRICS */}
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                   <StatCard icon={<Activity size={24}/>} label="Tổng Check-in" value={`${stats.totalCheckins} lượt`} color="bg-blue-600 text-blue-600" />
-                   <StatCard icon={<Users size={24}/>} label="Khách đang HD" value={`${stats.activeTickets} khách`} color="bg-green-600 text-green-600" />
-                   <StatCard icon={<AlertTriangle size={24}/>} label="Gói sắp hết" value={`${stats.expiringSoon} khách`} color="bg-orange-500 text-orange-500" />
-                   <StatCard icon={<XCircle size={24}/>} label="Hết hạn" value={`${stats.expiredTickets} khách`} color="bg-red-500 text-red-500" />
+                   <StatCard icon={<DollarSign size={28}/>} label="Doanh Thu Ước Tính" value={`${stats.totalRevenue.toLocaleString()}đ`} sub="Từ vé đã bán" color="text-green-600" />
+                   <StatCard icon={<Users size={28}/>} label="Hội Viên Active" value={stats.activeMembers} sub="Đang có vé hiệu lực" color="text-blue-600" />
+                   <StatCard icon={<Activity size={28}/>} label="Đang Tập (3h)" value={stats.realTimeGuests} sub="Real-time occupancy" color="text-orange-500" />
+                   <StatCard icon={<Repeat size={28}/>} label="Tỷ Lệ Retention" value={`${stats.retentionRate}%`} sub="Khách mua lại vé" color="text-purple-600" />
                </div>
 
-               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                   <h3 className="text-lg font-bold text-gray-800 mb-6 uppercase tracking-wide">Biểu đồ Check-in hôm nay</h3>
-                   <div className="h-80 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb"/>
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dy={10} />
-                                <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
-                                <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px' }} />
-                                <Bar dataKey="v" fill="#16a34a" radius={[4, 4, 0, 0]} barSize={40} />
-                            </BarChart>
-                        </ResponsiveContainer>
+               {/* CHARTS ROW */}
+               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                   <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                       <h3 className="text-sm font-bold text-gray-600 mb-6 uppercase tracking-wide flex items-center"><TrendingUp className="mr-2" size={16}/> Hiệu suất Check-in theo giờ</h3>
+                       <div className="h-72 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={hourlyData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb"/>
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dy={10} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
+                                    <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px' }} />
+                                    <Bar dataKey="v" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                       </div>
                    </div>
+                   
+                   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <h3 className="text-sm font-bold text-gray-600 mb-6 uppercase tracking-wide flex items-center"><DollarSign className="mr-2" size={16}/> Tỷ trọng Doanh thu</h3>
+                        <div className="h-72 w-full flex items-center justify-center">
+                            {stats.branchPerformance && stats.branchPerformance.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={stats.branchPerformance}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={80}
+                                            paddingAngle={5}
+                                            dataKey="revenue"
+                                        >
+                                            {stats.branchPerformance.map((entry: any, index: number) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip />
+                                        <Legend verticalAlign="bottom" height={36}/>
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <p className="text-gray-400">Chưa có dữ liệu</p>
+                            )}
+                        </div>
+                   </div>
+               </div>
+
+               {/* DETAILED BRANCH PERFORMANCE TABLE */}
+               <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                   <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                       <h3 className="font-bold text-gray-700">Hiệu quả hoạt động Chi nhánh</h3>
+                   </div>
+                   <table className="w-full text-sm text-left">
+                       <thead className="bg-white text-gray-500 font-bold uppercase text-xs">
+                           <tr>
+                               <th className="p-4">Chi Nhánh</th>
+                               <th className="p-4 text-right">Doanh Thu</th>
+                               <th className="p-4 text-center">Lượt Khách (Tổng)</th>
+                               <th className="p-4 text-center">Đang Tập (Real-time)</th>
+                               <th className="p-4 text-center">Đánh Giá</th>
+                           </tr>
+                       </thead>
+                       <tbody className="divide-y">
+                           {stats.branchPerformance?.map((b: any, idx: number) => (
+                               <tr key={idx} className="hover:bg-gray-50">
+                                   <td className="p-4 font-bold text-gray-800">{b.name}</td>
+                                   <td className="p-4 text-right font-mono text-brand-600">{b.revenue.toLocaleString()}đ</td>
+                                   <td className="p-4 text-center">{b.checkins}</td>
+                                   <td className="p-4 text-center">
+                                       <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded-full text-xs font-bold">{b.occupancy}</span>
+                                   </td>
+                                   <td className="p-4 text-center">
+                                       {b.revenue > 10000000 ? (
+                                           <span className="text-green-600 font-bold text-xs border border-green-200 bg-green-50 px-2 py-1 rounded">Xuất Sắc</span>
+                                       ) : (
+                                           <span className="text-gray-500 text-xs">Bình thường</span>
+                                       )}
+                                   </td>
+                               </tr>
+                           ))}
+                           {(!stats.branchPerformance || stats.branchPerformance.length === 0) && (
+                               <tr><td colSpan={5} className="p-6 text-center text-gray-400">Chưa có dữ liệu so sánh</td></tr>
+                           )}
+                       </tbody>
+                   </table>
                </div>
            </div>
        )}
 
+       {/* ... OTHER TABS (BRANCHES, STAFF, TICKETS, LOGS...) REMAIN UNCHANGED ... */}
+       
        {/* BRANCHES TAB */}
        {activeTab === 'branches' && (
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
@@ -477,7 +551,7 @@ const OwnerDashboard: React.FC = () => {
                                <h4 className="font-bold text-brand-600 mb-4">{b.name}</h4>
                                <div className="bg-white inline-block p-2 border-2 border-black rounded mb-4">
                                    <QRCode value={link} size={150} />
-                               </div>
+                                </div>
                                <p className="text-xs text-gray-400 break-all mb-4">{link}</p>
                                <button onClick={() => window.print()} className="w-full py-2 bg-gray-100 font-bold rounded hover:bg-gray-200">In QR này</button>
                            </div>
@@ -508,7 +582,7 @@ const OwnerDashboard: React.FC = () => {
            </div>
        )}
 
-       {/* CREATE TICKET MODAL (OWNER) */}
+       {/* CREATE TICKET MODAL */}
        {showCreateTicketModal && (
             <div className="absolute inset-0 z-30 bg-black/50 flex items-center justify-center p-4">
                 <div className="bg-white p-6 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
